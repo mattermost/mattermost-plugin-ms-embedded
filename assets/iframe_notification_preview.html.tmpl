@@ -214,6 +214,7 @@
                 teamsReady.then(() => {
                     return microsoftTeams.pages.navigateToApp({
                         appId: appID,
+                        pageId: 'Mattermost',
                         subPageId: 'post_{{.Post.Id}}'
                     });
                 }).catch((error) => {
