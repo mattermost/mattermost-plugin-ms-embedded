@@ -26,6 +26,13 @@ import (
 	"github.com/mattermost/mattermost-plugin-ms-embedded/server/store/pluginstore"
 )
 
+const (
+	// TeamsJSVersion and TeamsJSIntegrity are the single source of truth for the
+	// Microsoft Teams JS SDK loaded by iframe and SSO HTML templates. Bump both together.
+	TeamsJSVersion   = "2.53.0"
+	TeamsJSIntegrity = "sha384-UFKwOGC8ix6vOFFC4vH8hSpjwkQXZmSjCx8aaxwhbtm+6joQdNvD7b4pPk82cYAD"
+)
+
 type iFrameContext struct {
 	SiteURL    string
 	PluginID   string
@@ -33,6 +40,11 @@ type iFrameContext struct {
 	TeamsAppID string
 	UserID     string
 	Nonce      string
+
+	TeamsJSVersion string
+	// TeamsJSIntegrityAttr is the full integrity="..." attribute. Injected as
+	// template.HTMLAttr so html/template does not escape '+' in the SRI hash to '&#43;'.
+	TeamsJSIntegrityAttr template.HTMLAttr
 
 	Post                       *model.Post
 	PostJSON                   string
@@ -145,7 +157,7 @@ func (a *API) iframeNotificationPreview(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-// createIFrameContext creates the iFrame context for the iFrame and iFrameNotificationPreview HTML templates.
+// createIFrameContext creates the iFrame context for the iframe, notification preview, and SSO HTML templates.
 func (a *API) createIFrameContext(userID string, post *model.Post) (iFrameContext, error) {
 	config := a.p.API.GetConfig()
 	if *config.ServiceSettings.SiteURL == "" {
@@ -164,12 +176,14 @@ func (a *API) createIFrameContext(userID string, post *model.Post) (iFrameContex
 	}
 
 	iFrameCtx := iFrameContext{
-		SiteURL:    *config.ServiceSettings.SiteURL,
-		PluginID:   url.PathEscape(manifest.Id),
-		TenantID:   a.p.getConfiguration().M365TenantID,
-		TeamsAppID: appID,
-		UserID:     userID,
-		Post:       post,
+		SiteURL:              *config.ServiceSettings.SiteURL,
+		PluginID:             url.PathEscape(manifest.Id),
+		TenantID:             a.p.getConfiguration().M365TenantID,
+		TeamsAppID:           appID,
+		UserID:               userID,
+		Post:                 post,
+		TeamsJSVersion:       TeamsJSVersion,
+		TeamsJSIntegrityAttr: template.HTMLAttr(`integrity="` + TeamsJSIntegrity + `"`),
 	}
 
 	// Generate a random nonce for the script/style tags
