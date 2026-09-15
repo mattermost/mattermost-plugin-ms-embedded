@@ -176,14 +176,15 @@ func (a *API) createIFrameContext(userID string, post *model.Post) (iFrameContex
 	}
 
 	iFrameCtx := iFrameContext{
-		SiteURL:              *config.ServiceSettings.SiteURL,
-		PluginID:             url.PathEscape(manifest.Id),
-		TenantID:             a.p.getConfiguration().M365TenantID,
-		TeamsAppID:           appID,
-		UserID:               userID,
-		Post:                 post,
-		TeamsJSVersion:       TeamsJSVersion,
-		TeamsJSIntegrityAttr: template.HTMLAttr(`integrity="` + TeamsJSIntegrity + `"`),
+		SiteURL:        *config.ServiceSettings.SiteURL,
+		PluginID:       url.PathEscape(manifest.Id),
+		TenantID:       a.p.getConfiguration().M365TenantID,
+		TeamsAppID:     appID,
+		UserID:         userID,
+		Post:           post,
+		TeamsJSVersion: TeamsJSVersion,
+		// TeamsJSIntegrity is a compile-time constant SRI hash, not user input.
+		TeamsJSIntegrityAttr: template.HTMLAttr(`integrity="` + TeamsJSIntegrity + `"`), //nolint:gosec // G203
 	}
 
 	// Generate a random nonce for the script/style tags
