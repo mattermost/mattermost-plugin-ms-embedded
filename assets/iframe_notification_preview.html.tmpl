@@ -213,7 +213,7 @@
                 }
 
                 try {
-                    microsoftTeams.app.notifySuccess();
+                    await microsoftTeams.app.notifySuccess();
                 } catch (error) {
                     console.error('Failed to notify Microsoft Teams of load success:', error);
                 }

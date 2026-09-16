@@ -9,11 +9,12 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
-	"path/filepath"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,13 +27,16 @@ func TestTeamsJSIntegrityMatchesCDN(t *testing.T) {
 		t.Skip("requires network access to the Office CDN")
 	}
 
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
 	url := fmt.Sprintf("https://res.cdn.office.net/teams-js/%s/js/MicrosoftTeams.min.js", TeamsJSVersion)
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	require.NoError(t, err)
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
 	body, err := io.ReadAll(resp.Body)
@@ -44,7 +48,9 @@ func TestTeamsJSIntegrityMatchesCDN(t *testing.T) {
 }
 
 func TestTemplatesUseTeamsJSConstants(t *testing.T) {
-	templates, err := filepath.Glob("../assets/*.html.tmpl")
+	assets := os.DirFS("../assets")
+
+	templates, err := fs.Glob(assets, "*.html.tmpl")
 	require.NoError(t, err)
 	require.NotEmpty(t, templates)
 
@@ -52,7 +58,7 @@ func TestTemplatesUseTeamsJSConstants(t *testing.T) {
 
 	tags := 0
 	for _, path := range templates {
-		content, err := os.ReadFile(path)
+		content, err := fs.ReadFile(assets, path)
 		require.NoError(t, err)
 
 		for _, tag := range scriptTag.FindAllString(string(content), -1) {
