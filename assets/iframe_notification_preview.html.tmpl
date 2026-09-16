@@ -202,16 +202,31 @@
         let appID = "{{.TeamsAppID}}";
 
         (function (microsoftTeams) {
-            // Resolve only after initialize() completes so other Teams APIs are safe to call.
-            const teamsReady = microsoftTeams.app.initialize(["{{.SiteURL}}"]).then(() => {
-                microsoftTeams.app.notifySuccess();
-            }).catch((error) => {
-                console.error('Failed to initialize Microsoft Teams SDK:', error);
-                throw error;
-            });
+            // Resolves to a boolean and never rejects: a failed init must not leave a
+            // dangling rejection or permanently disable the button.
+            const teamsReady = (async () => {
+                try {
+                    await microsoftTeams.app.initialize(["{{.SiteURL}}"]);
+                } catch (error) {
+                    console.error('Failed to initialize Microsoft Teams SDK:', error);
+                    return false;
+                }
+
+                try {
+                    microsoftTeams.app.notifySuccess();
+                } catch (error) {
+                    console.error('Failed to notify Microsoft Teams of load success:', error);
+                }
+
+                return true;
+            })();
 
             function goToMattermost() {
-                teamsReady.then(() => {
+                teamsReady.then((ready) => {
+                    if (!ready) {
+                        return;
+                    }
+
                     return microsoftTeams.pages.navigateToApp({
                         appId: appID,
                         pageId: 'Mattermost',
@@ -227,7 +242,7 @@
                 document.getElementById('message-content').innerHTML = marked.parse(messageContent);
                 document.getElementById('view-in-mattermost').addEventListener('click', goToMattermost);
             };
-        })(microsoftTeams);
+        })(window.microsoftTeams);
     </script>
 
     <div class="notification-container">
