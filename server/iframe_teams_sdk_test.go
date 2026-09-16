@@ -11,13 +11,14 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
-	"os"
 	"regexp"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mattermost/mattermost-plugin-ms-embedded/assets"
 )
 
 // TeamsJSVersion and TeamsJSIntegrity are independent constants; a version bump that
@@ -48,9 +49,7 @@ func TestTeamsJSIntegrityMatchesCDN(t *testing.T) {
 }
 
 func TestTemplatesUseTeamsJSConstants(t *testing.T) {
-	assets := os.DirFS("../assets")
-
-	templates, err := fs.Glob(assets, "*.html.tmpl")
+	templates, err := fs.Glob(assets.Templates, "*.html.tmpl")
 	require.NoError(t, err)
 	require.NotEmpty(t, templates)
 
@@ -58,7 +57,7 @@ func TestTemplatesUseTeamsJSConstants(t *testing.T) {
 
 	tags := 0
 	for _, path := range templates {
-		content, err := fs.ReadFile(assets, path)
+		content, err := fs.ReadFile(assets.Templates, path)
 		require.NoError(t, err)
 
 		for _, tag := range scriptTag.FindAllString(string(content), -1) {

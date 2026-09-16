@@ -4,8 +4,11 @@
 package assets
 
 import (
-	_ "embed"
+	"embed"
 )
+
+//go:embed *.tmpl
+var Templates embed.FS
 
 //go:embed mm-logo-color.png
 var LogoColorData []byte
