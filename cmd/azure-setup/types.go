@@ -52,6 +52,22 @@ const (
 	ClientIDOfficeUniversal = "ea5a67f6-b6f3-4338-b240-c655ddc3cc8e"
 )
 
+// doctorRequirementNames are the Microsoft Graph application permissions that
+// `azure-setup doctor` needs in order to read an application's configuration,
+// its service principal, and the consent grants in the tenant.
+//
+// They are deliberately NOT part of getRequiredPermissions(): the plugin itself
+// never uses them and the doctor audits only the permissions the plugin needs.
+// They are added solely by `create --create-doctor-requirements`.
+//
+// The names are resolved to role IDs at runtime from the Microsoft Graph service
+// principal instead of being hardcoded here, so a renamed or re-issued role
+// surfaces as a clear error rather than an opaque Graph rejection.
+var doctorRequirementNames = []string{
+	"Application.Read.All",
+	"Directory.Read.All",
+}
+
 // Scope configuration
 const (
 	ScopeName        = "access_as_user"
@@ -75,12 +91,13 @@ type SetupConfig struct {
 	SecretExpiration  int    // Duration in months (default: 12)
 
 	// Flags
-	DryRun           bool
-	NonInteractive   bool
-	Verbose          bool
-	OutputFormat     string // "human", "json", "env"
-	SkipConfirmation bool   // Skip pre-flight confirmation prompt
-	Cloud            string // Microsoft national cloud: "commercial" (default), "gcchigh", or "dod"
+	CreateDoctorRequirements bool // Also request the permissions `azure-setup doctor` needs
+	DryRun                   bool
+	NonInteractive           bool
+	Verbose                  bool
+	OutputFormat             string // "human", "json", "env"
+	SkipConfirmation         bool   // Skip pre-flight confirmation prompt
+	Cloud                    string // Microsoft national cloud: "commercial" (default), "gcchigh", or "dod"
 
 	// Internal state
 	ctx        context.Context
@@ -118,6 +135,10 @@ type SetupResult struct {
 	// Operation Details
 	Created bool // true if created new, false if updated existing
 	DryRun  bool
+
+	// DoctorRequirements records that --create-doctor-requirements was used, so
+	// the output can point out that admin consent covers those permissions too.
+	DoctorRequirements bool
 }
 
 // requiredPermission represents a Graph API permission that needs to be configured

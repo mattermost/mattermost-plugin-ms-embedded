@@ -20,22 +20,8 @@ import (
 
 // validateInputs validates all user inputs before proceeding
 func validateInputs(config *SetupConfig) error {
-	// Validate Mattermost site URL
-	if config.MattermostSiteURL == "" {
-		return errors.New("Mattermost site URL is required")
-	}
-
-	u, err := url.Parse(config.MattermostSiteURL)
-	if err != nil {
-		return errors.Wrap(err, "invalid Mattermost site URL")
-	}
-
-	if u.Scheme == "" || u.Host == "" {
-		return errors.New("Mattermost site URL must include protocol (https://) and hostname")
-	}
-
-	if u.Scheme != "https" {
-		return errors.New("Mattermost site URL must use HTTPS protocol")
+	if err := validateSiteURL(config.MattermostSiteURL); err != nil {
+		return err
 	}
 
 	// Validate app name
@@ -66,6 +52,30 @@ func validateInputs(config *SetupConfig) error {
 	return nil
 }
 
+// validateSiteURL checks that a Mattermost site URL is usable as the basis of
+// the Application ID URI: url.Parse accepts almost any non-empty string, so the
+// scheme and host are verified explicitly.
+func validateSiteURL(siteURL string) error {
+	if siteURL == "" {
+		return errors.New("Mattermost site URL is required")
+	}
+
+	u, err := url.Parse(siteURL)
+	if err != nil {
+		return errors.Wrap(err, "invalid Mattermost site URL")
+	}
+
+	if u.Scheme == "" || u.Host == "" {
+		return errors.New("Mattermost site URL must include protocol (https://) and hostname")
+	}
+
+	if u.Scheme != "https" {
+		return errors.New("Mattermost site URL must use HTTPS protocol")
+	}
+
+	return nil
+}
+
 // resolveCloud normalizes and validates a national cloud name supplied via the
 // --cloud flag and returns the resolved environment. Normalization (trim and
 // lowercase) matches cloudenv.EnvironmentFor so validation and resolution agree,
@@ -82,71 +92,98 @@ func resolveCloud(name string) (cloudenv.Environment, error) {
 	return cloudenv.EnvironmentFor(normalized), nil
 }
 
+// directoryContext describes the signed-in identity and the application
+// administration roles it holds.
+type directoryContext struct {
+	UserPrincipalName string
+
+	// AdminRoles lists the display names of the application administration roles
+	// held by the signed-in user.
+	AdminRoles []string
+
+	// RolesErr records a failure to read the directory role membership. Role
+	// lookup is not always permitted, so callers treat this as unknown rather
+	// than as a lack of permissions.
+	RolesErr error
+}
+
+// describeSignedInUser resolves who is signed in and which application
+// administration roles they hold.
+func describeSignedInUser(ctx context.Context, client *msgraphsdk.GraphServiceClient) (directoryContext, error) {
+	var directory directoryContext
+
+	me, err := client.Me().Get(ctx, nil)
+	if err != nil {
+		return directory, errors.Wrap(err, "failed to get current user information")
+	}
+
+	if me == nil {
+		return directory, errors.New("Azure returned no information for the current user")
+	}
+	directory.UserPrincipalName = derefString(me.GetUserPrincipalName())
+
+	memberOf, err := client.Me().MemberOf().Get(ctx, nil)
+	if err != nil {
+		directory.RolesErr = err
+		return directory, nil
+	}
+
+	if memberOf == nil {
+		return directory, nil
+	}
+
+	for _, member := range memberOf.GetValue() {
+		directoryRole, ok := member.(models.DirectoryRoleable)
+		if !ok || directoryRole.GetRoleTemplateId() == nil {
+			continue
+		}
+
+		if isApplicationAdminRole(*directoryRole.GetRoleTemplateId()) {
+			directory.AdminRoles = append(directory.AdminRoles, derefString(directoryRole.GetDisplayName()))
+		}
+	}
+
+	return directory, nil
+}
+
 // validatePermissions checks if the authenticated user has the necessary permissions
+// to create and manage applications: an Application Administrator, Cloud Application
+// Administrator, or Global Administrator role, or a tenant that lets users create
+// applications. Missing roles are reported as a warning so the operation can still
+// proceed and fail on the actual Graph call if permissions turn out to be too narrow.
 func validatePermissions(ctx context.Context, client *msgraphsdk.GraphServiceClient, verbose bool) error {
 	if verbose {
 		fmt.Println("🔍 Checking user permissions...")
 	}
 
-	// Get the current user's service principal to check permissions
-	// We need to verify the user can create/manage applications
-	me, err := client.Me().Get(ctx, nil)
+	directory, err := describeSignedInUser(ctx, client)
 	if err != nil {
-		return errors.Wrap(err, "failed to get current user information")
+		return err
 	}
 
 	if verbose {
-		fmt.Printf("   Authenticated as: %s\n", *me.GetUserPrincipalName())
+		fmt.Printf("   Authenticated as: %s\n", directory.UserPrincipalName)
 	}
 
-	// Check if user has the necessary directory roles or permissions
-	// For creating apps, user needs one of:
-	// - Application Administrator role
-	// - Cloud Application Administrator role
-	// - Global Administrator role
-	// OR
-	// - Users can create applications setting enabled
-
-	memberOf, err := client.Me().MemberOf().Get(ctx, nil)
-	if err != nil {
+	if directory.RolesErr != nil {
 		// Always show this warning as it's important for users to know
 		fmt.Println("⚠️  Warning: Could not check directory roles")
 		if verbose {
-			fmt.Printf("   Error details: %v\n", err)
+			fmt.Printf("   Error details: %v\n", directory.RolesErr)
 		}
-		// Don't fail here - proceed and let the actual operations fail if needed
 		return nil
 	}
 
-	// Check for admin roles
-	hasAdminRole := false
-	if memberOf != nil && memberOf.GetValue() != nil {
-		for _, member := range memberOf.GetValue() {
-			if directoryRole, ok := member.(models.DirectoryRoleable); ok {
-				roleTemplate := directoryRole.GetRoleTemplateId()
-				if roleTemplate != nil {
-					roleID := *roleTemplate
-					// Check for known admin role template IDs
-					if isApplicationAdminRole(roleID) {
-						hasAdminRole = true
-						if verbose {
-							fmt.Printf("   ✅ User has admin role: %s\n", *directoryRole.GetDisplayName())
-						}
-						break
-					}
-				}
-			}
-		}
-	}
-
-	if !hasAdminRole {
+	if len(directory.AdminRoles) == 0 {
 		// Always show this warning as it's critical for users to know
 		fmt.Println("⚠️  Warning: User may not have Application Administrator permissions")
 		fmt.Println("   Setup will proceed, but may fail if permissions are insufficient")
 		fmt.Println("   Required role: Application Administrator, Cloud Application Administrator, or Global Administrator")
+		return nil
 	}
 
-	if verbose && hasAdminRole {
+	if verbose {
+		fmt.Printf("   ✅ User has admin role: %s\n", strings.Join(directory.AdminRoles, ", "))
 		fmt.Println("✅ User has sufficient permissions")
 	}
 
@@ -195,7 +232,7 @@ func checkExistingApp(ctx context.Context, client *msgraphsdk.GraphServiceClient
 	apps, err := client.Applications().Get(ctx, &applications.ApplicationsRequestBuilderGetRequestConfiguration{
 		QueryParameters: &applications.ApplicationsRequestBuilderGetQueryParameters{
 			Filter: &filter,
-			Select: []string{"id", "appId", "displayName", "api", "identifierUris", "signInAudience"},
+			Select: []string{"id", "appId", "displayName", "api", "identifierUris", "signInAudience", "requiredResourceAccess"},
 		},
 	})
 	if err != nil {
@@ -275,4 +312,14 @@ func getTenantID(ctx context.Context, client *msgraphsdk.GraphServiceClient, ver
 	}
 
 	return *tenantID, nil
+}
+
+// adminConsentURL builds the Azure portal deep link an administrator uses to
+// grant admin consent for the application's API permissions.
+func adminConsentURL(portalHost, clientID string) string {
+	if portalHost == "" {
+		portalHost = "portal.azure.com"
+	}
+
+	return fmt.Sprintf("https://%s/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/CallAnAPI/appId/%s", portalHost, clientID)
 }

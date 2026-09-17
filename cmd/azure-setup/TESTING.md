@@ -202,6 +202,29 @@ Tests for complete workflows using mocks (no Azure credentials required):
 - ✅ Tests business logic and orchestration
 - ✅ Validates all workflow paths
 
+### 7. `doctor_test.go` - Configuration Doctor Tests
+
+Tests for the read-only `doctor` command. Every check is a pure function over a
+`doctorInputs` fixture, so the full rule set is exercised without a live tenant.
+
+**Test Cases:**
+- ✅ `TestRunDoctorChecksHealthyApplication` - A correctly configured app passes every check
+- ✅ `TestCheckSignInAudience` - Single tenant, multi tenant, and unset audiences
+- ✅ `TestCheckApplicationIDURI` - Matching, missing, mismatched, and ambiguous identifier URIs
+- ✅ `TestCheckExposedScope` - Missing, disabled, admin-only, and undocumented `access_as_user` scope
+- ✅ `TestCheckPreAuthorizedClients` - Missing clients, stale scope IDs, and unmanaged extras
+- ✅ `TestCheckRequiredPermissions` - Missing permissions and wrong permission types
+- ✅ `TestCheckServicePrincipal` - Enabled, disabled, missing, and unreadable service principals
+- ✅ `TestCheckDelegatedConsent` / `TestCheckAppRoleConsent` - Tenant-wide, per-user, and missing consent
+- ✅ `TestCheckClientSecrets` - Valid, expiring, and fully expired secrets
+- ✅ `TestCheckCertificates`, `TestCheckOwners`, `TestCheckDuplicateApplications` - Housekeeping rules
+- ✅ `TestDoctorReportFinalize` - Overall status precedence (fail > warn > pass, skips ignored)
+- ✅ `TestRenderDoctorReportHuman` / `JSON` / `Markdown` - All three report formats
+
+**Benefits:**
+- ✅ No Azure credentials required
+- ✅ Each rule is asserted independently, so a regression names the broken check
+
 ## Running Tests
 
 ### Run All Unit Tests
