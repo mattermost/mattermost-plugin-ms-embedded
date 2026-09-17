@@ -170,6 +170,10 @@ func init() {
 
 // runCreate executes the create command
 func runCreate(cmd *cobra.Command, args []string) error {
+	// Flags have parsed by the time RunE is reached, so a failure from here on
+	// is an Azure or configuration error rather than a usage mistake.
+	cmd.SilenceUsage = true
+
 	// Set a reasonable timeout for the entire operation
 	// 10 minutes allows sufficient time for device code flows with MFA
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -251,6 +255,9 @@ func runCreate(cmd *cobra.Command, args []string) error {
 
 // runValidate executes the validate command
 func runValidate(cmd *cobra.Command, args []string) error {
+	// See runCreate: past flag parsing, a failure is not a usage mistake.
+	cmd.SilenceUsage = true
+
 	// Set a reasonable timeout for validation
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()

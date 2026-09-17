@@ -242,7 +242,7 @@ depends on is configured correctly. The doctor is read-only: it never changes Az
 | Identity & access | Sign-in succeeds, the signed-in user holds an application administration role, tenant is resolved |
 | Application registration | The application exists, is single tenant, and its Application ID URI matches the Mattermost site URL |
 | Exposed API | The `access_as_user` scope is exposed, enabled, user-consentable, and fully described; every Microsoft first-party client (Teams, Outlook, Office, Copilot) is pre-authorized for it |
-| API permissions | `User.Read`, `TeamsActivity.Send`, and `AppCatalog.Read.All` are requested with the correct type. Any other permission — including the doctor's own `Application.Read.All` / `Directory.Read.All` — is listed by name but never affects the status |
+| API permissions | `User.Read`, `TeamsActivity.Send`, and `AppCatalog.Read.All` are requested with the correct type. Any other permission — including the doctor's own `Application.Read.All` / `Directory.Read.All` — is listed but never affects the status; names are resolved from the Microsoft Graph service principal, falling back to the raw permission ID when a name cannot be resolved |
 | Admin consent | A service principal exists and is enabled, and each delegated and application permission has been consented tenant-wide |
 | Credentials | At least one client secret is valid, with a warning before it expires; expired secrets and certificates are reported |
 | Housekeeping | The application has owners, and no other registration shares its display name |

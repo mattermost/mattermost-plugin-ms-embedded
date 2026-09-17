@@ -218,7 +218,7 @@ Tests for the read-only `doctor` command. Every check is a pure function over a
 - ✅ `TestCheckDelegatedConsent` / `TestCheckAppRoleConsent` - Tenant-wide, per-user, and missing consent
 - ✅ `TestCheckClientSecrets` - Valid, expiring, and fully expired secrets
 - ✅ `TestCheckCertificates`, `TestCheckOwners`, `TestCheckDuplicateApplications` - Housekeeping rules
-- ✅ `TestDoctorReportFinalize` - Overall status precedence (fail > warn > pass, skips ignored)
+- ✅ `TestDoctorReportFinalize` - Overall status precedence (fail > warn > pass); a `StatusSkip` alongside a `StatusPass` downgrades the overall status to `warn` and is included in the counts, so an unverified check never reports as healthy
 - ✅ `TestRenderDoctorReportHuman` / `JSON` / `Markdown` - All three report formats
 
 **Benefits:**

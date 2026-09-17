@@ -10,7 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/microsoft/kiota-abstractions-go/serialization"
 	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
+	msgraphcore "github.com/microsoftgraph/msgraph-sdk-go-core"
 	"github.com/microsoftgraph/msgraph-sdk-go/applications"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"github.com/microsoftgraph/msgraph-sdk-go/serviceprincipals"
@@ -381,46 +383,76 @@ func readConsentState(ctx context.Context, client *msgraphsdk.GraphServiceClient
 	spID := derefString(sp.GetId())
 	state := consentState{}
 
-	var err error
-
+	// Both collections are paged. Per-user consent creates one grant per user,
+	// so a widely used application can hold far more than a single page, and a
+	// truncated read would report consent that exists as missing.
 	grants, err := client.ServicePrincipals().ByServicePrincipalId(spID).Oauth2PermissionGrants().Get(ctx, nil)
-	switch {
-	case err != nil:
+	if err != nil {
 		state.DelegatedErr = err
-	case grants != nil:
-		for _, grant := range grants.GetValue() {
-			if !strings.EqualFold(derefString(grant.GetResourceId()), graphSPID) {
-				continue
-			}
+	} else {
+		state.DelegatedErr = iteratePages(ctx, client, grants,
+			models.CreateOAuth2PermissionGrantCollectionResponseFromDiscriminatorValue,
+			func(grant models.OAuth2PermissionGrantable) {
+				if !strings.EqualFold(derefString(grant.GetResourceId()), graphSPID) {
+					return
+				}
 
-			// Each grant carries its own consent type, so the scopes are kept
-			// apart: merging them would report a single user's consent as
-			// tenant-wide whenever any other grant happens to be AllPrincipals.
-			scopes := strings.Fields(derefString(grant.GetScope()))
-			if strings.EqualFold(derefString(grant.GetConsentType()), "AllPrincipals") {
-				state.TenantWideScopes = append(state.TenantWideScopes, scopes...)
-				continue
-			}
+				// Each grant carries its own consent type, so the scopes are kept
+				// apart: merging them would report a single user's consent as
+				// tenant-wide whenever any other grant happens to be AllPrincipals.
+				scopes := strings.Fields(derefString(grant.GetScope()))
+				if strings.EqualFold(derefString(grant.GetConsentType()), "AllPrincipals") {
+					state.TenantWideScopes = append(state.TenantWideScopes, scopes...)
+					return
+				}
 
-			state.UserScopes = append(state.UserScopes, scopes...)
-		}
+				state.UserScopes = append(state.UserScopes, scopes...)
+			})
 	}
 
 	assignments, err := client.ServicePrincipals().ByServicePrincipalId(spID).AppRoleAssignments().Get(ctx, nil)
-	switch {
-	case err != nil:
+	if err != nil {
 		state.AppRoleErr = err
-	case assignments != nil:
-		for _, assignment := range assignments.GetValue() {
-			if assignment.GetResourceId() == nil || !strings.EqualFold(assignment.GetResourceId().String(), graphSPID) {
-				continue
-			}
+	} else {
+		state.AppRoleErr = iteratePages(ctx, client, assignments,
+			models.CreateAppRoleAssignmentCollectionResponseFromDiscriminatorValue,
+			func(assignment models.AppRoleAssignmentable) {
+				if assignment.GetResourceId() == nil || !strings.EqualFold(assignment.GetResourceId().String(), graphSPID) {
+					return
+				}
 
-			state.AppRoleIDs = append(state.AppRoleIDs, uuidString(assignment.GetAppRoleId()))
-		}
+				state.AppRoleIDs = append(state.AppRoleIDs, uuidString(assignment.GetAppRoleId()))
+			})
 	}
 
 	return state
+}
+
+// iteratePages walks every page of a Graph collection response, invoking visit
+// for each item. Graph caps a collection page at a few hundred items and
+// signals the rest with an @odata.nextLink, which a single Get does not follow.
+func iteratePages[T any](
+	ctx context.Context,
+	client *msgraphsdk.GraphServiceClient,
+	response any,
+	factory serialization.ParsableFactory,
+	visit func(item T),
+) error {
+	// A nil collection means Graph returned no body: an empty result, not a
+	// failure, so it must not surface as an unreadable check.
+	if response == nil {
+		return nil
+	}
+
+	iterator, err := msgraphcore.NewPageIterator[T](response, client.GetAdapter(), factory)
+	if err != nil {
+		return err
+	}
+
+	return iterator.Iterate(ctx, func(item T) bool {
+		visit(item)
+		return true
+	})
 }
 
 // findGraphServicePrincipal returns the Microsoft Graph service principal in
