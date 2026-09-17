@@ -5,6 +5,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 )
 
 // executeRollback executes all rollback functions in reverse order
@@ -18,8 +19,7 @@ func executeRollback(config *SetupConfig) {
 	// Execute rollback functions in reverse order
 	// Track failures so we can warn about potentially leaked resources
 	var failures []error
-	for i := len(config.rollback) - 1; i >= 0; i-- {
-		rollbackFunc := config.rollback[i]
+	for _, rollbackFunc := range slices.Backward(config.rollback) {
 		if err := rollbackFunc(); err != nil {
 			failures = append(failures, err)
 			fmt.Printf("   ⚠️  Rollback operation failed: %v\n", err)

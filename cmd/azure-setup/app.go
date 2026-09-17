@@ -113,10 +113,18 @@ func updateApplication(ctx context.Context, client *msgraphsdk.GraphServiceClien
 		return nil, errors.Wrap(err, "failed to update application")
 	}
 
+	// Microsoft Graph answers a successful PATCH with 204 No Content, which the
+	// SDK surfaces as a nil application. The patch did apply, so fall back to
+	// the object already in hand: later steps dereference its ID and read its
+	// existing requiredResourceAccess to avoid dropping permissions.
+	if updatedApp == nil {
+		updatedApp = existingApp
+	}
+
 	if config.Verbose {
-		fmt.Printf("✅ Application updated: %s\n", *updatedApp.GetDisplayName())
-		fmt.Printf("   Client ID: %s\n", *updatedApp.GetAppId())
-		fmt.Printf("   Object ID: %s\n", *updatedApp.GetId())
+		fmt.Printf("✅ Application updated: %s\n", derefString(updatedApp.GetDisplayName()))
+		fmt.Printf("   Client ID: %s\n", derefString(updatedApp.GetAppId()))
+		fmt.Printf("   Object ID: %s\n", derefString(updatedApp.GetId()))
 	}
 
 	return updatedApp, nil
