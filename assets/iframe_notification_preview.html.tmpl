@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script
-        src="https://res.cdn.office.net/teams-js/2.34.0/js/MicrosoftTeams.min.js"
-        integrity="sha384-brW9AazbKR2dYw2DucGgWCCcmrm2oBFV4HQidyuyZRI/TnAkmOOnTARSTdps3Hwt"
+        src="https://res.cdn.office.net/teams-js/{{.TeamsJSVersion}}/js/MicrosoftTeams.min.js"
+        {{.TeamsJSIntegrityAttr}}
         crossorigin="anonymous"
     ></script>
     <script
@@ -199,53 +199,50 @@
 </head>
 <body>
     <script nonce="{{.Nonce}}">
-        // Variables that need to be in global scope
-        let context;
-        let currentUserId = "{{.UserID}}";
         let appID = "{{.TeamsAppID}}";
 
-        // IIFE for initialization and utility functions
-        (function() {
-            // Initialize Teams SDK
-            async function initializeTeams() {
+        (function (microsoftTeams) {
+            // Resolves to a boolean and never rejects: a failed init must not leave a
+            // dangling rejection or permanently disable the button.
+            const teamsReady = (async () => {
                 try {
                     await microsoftTeams.app.initialize(["{{.SiteURL}}"]);
-                    microsoftTeams.app.notifySuccess();
                 } catch (error) {
                     console.error('Failed to initialize Microsoft Teams SDK:', error);
+                    return false;
                 }
-            }
 
-            // Format date utility function
-            function formatDate(timestamp) {
-                const date = new Date(timestamp);
-                return date.toLocaleString();
-            }
+                try {
+                    await microsoftTeams.app.notifySuccess();
+                } catch (error) {
+                    console.error('Failed to notify Microsoft Teams of load success:', error);
+                }
 
-            // Function to navigate to Mattermost
+                return true;
+            })();
+
             function goToMattermost() {
-                microsoftTeams.pages.navigateToApp({
-                    appId: appID,
-                    subPageId: 'post_{{.Post.Id}}'
+                teamsReady.then((ready) => {
+                    if (!ready) {
+                        return;
+                    }
+
+                    return microsoftTeams.pages.navigateToApp({
+                        appId: appID,
+                        pageId: 'Mattermost',
+                        subPageId: 'post_{{.Post.Id}}'
+                    });
+                }).catch((error) => {
+                    console.error('Failed to navigate to Mattermost:', error);
                 });
             }
 
-            // Initialize Teams SDK
-            initializeTeams();
-            microsoftTeams.app.getContext().then((c) => {
-                context = c;
-            });
-
-            // Set up window.onload to handle DOM-dependent operations
             window.onload = function() {
-                // Render the message as markdown
                 const messageContent = `{{.Post.Message}}`;
                 document.getElementById('message-content').innerHTML = marked.parse(messageContent);
-
-                // Add event listener to the view link
                 document.getElementById('view-in-mattermost').addEventListener('click', goToMattermost);
             };
-        })();
+        })(window.microsoftTeams);
     </script>
 
     <div class="notification-container">
