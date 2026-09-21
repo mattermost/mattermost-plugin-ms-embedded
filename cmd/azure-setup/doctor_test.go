@@ -948,6 +948,40 @@ func TestCheckApplicationIDURIIsCaseInsensitive(t *testing.T) {
 		"the summary should report the URI Azure actually holds")
 }
 
+func TestCheckApplicationIDURIPathIsCaseSensitive(t *testing.T) {
+	// Entra issues the identifier URI verbatim as the Teams SSO audience and the
+	// plugin compares it exactly, so a path that differs only in case is a
+	// genuinely broken install and must not report PASS.
+	app := healthyApp(t)
+	app.SetIdentifierUris([]string{"api://corp.example.com/mattermost/" + testClientID})
+
+	result := checkApplicationIDURI(app, "https://corp.example.com/Mattermost")
+	assert.Equal(t, StatusFail, result.Status)
+	assert.Contains(t, result.Summary, "api://corp.example.com/Mattermost/"+testClientID)
+}
+
+func TestEqualApplicationIDURI(t *testing.T) {
+	tests := []struct {
+		name  string
+		a, b  string
+		equal bool
+	}{
+		{name: "identical", a: "api://h.example.com/id", b: "api://h.example.com/id", equal: true},
+		{name: "host case differs", a: "api://H.Example.COM/id", b: "api://h.example.com/id", equal: true},
+		{name: "scheme case differs", a: "API://h.example.com/id", b: "api://h.example.com/id", equal: true},
+		{name: "path case differs", a: "api://h.example.com/MM/id", b: "api://h.example.com/mm/id"},
+		{name: "path present on one side only", a: "api://h.example.com/id", b: "api://h.example.com/mm/id"},
+		{name: "different host", a: "api://a.example.com/id", b: "api://b.example.com/id"},
+		{name: "non-api scheme falls back to exact match", a: "https://h.example.com", b: "https://H.example.com"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.equal, equalApplicationIDURI(test.a, test.b))
+		})
+	}
+}
+
 func TestCheckPreAuthorizedClientsFoldsScopeID(t *testing.T) {
 	// A pre-authorized entry written by another tool can hold the scope ID in
 	// uppercase; uuid.UUID.String() is always lowercase.

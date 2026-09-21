@@ -142,8 +142,9 @@ func checkApplicationIDURI(app models.Applicationable, siteURL string) CheckResu
 	}
 
 	if siteURL == "" {
-		// Hosts are case-insensitive and Azure stores the URI exactly as it was
-		// entered, so shape matching folds case.
+		// Only the scheme and the trailing client ID are checked here, both of
+		// which Azure stores in a fixed case; the path in between is not
+		// inspected without a --site-url to compare it against.
 		configured := strings.ToLower(uris[0])
 		suffix := strings.ToLower("/" + clientID)
 
@@ -167,12 +168,9 @@ func checkApplicationIDURI(app models.Applicationable, siteURL string) CheckResu
 		return result
 	}
 
-	// The expected URI is built from the operator-supplied --site-url, whose host
-	// casing is preserved verbatim, so it is matched case-insensitively against
-	// what Azure actually stores.
 	matched := ""
 	for _, uri := range uris {
-		if strings.EqualFold(uri, expected) {
+		if equalApplicationIDURI(uri, expected) {
 			matched = uri
 			break
 		}
@@ -686,6 +684,26 @@ func checkDuplicateApplications(app models.Applicationable, duplicates []string,
 	result.Remediation = "Always pass --client-id to `azure-setup` so it targets this registration, and delete the unused duplicates"
 
 	return result
+}
+
+// equalApplicationIDURI compares two api:// identifier URIs the way they are
+// actually resolved. The host is case-insensitive per DNS, so an operator
+// typing --site-url https://Corp.Example.com must still match the URI Azure
+// holds. Everything after it is not: Entra issues the identifier URI verbatim
+// as the token audience, and the plugin compares that audience exactly, so
+// api://corp.example.com/Mattermost/<id> and .../mattermost/<id> are two
+// different audiences and only one of them works.
+func equalApplicationIDURI(a, b string) bool {
+	const scheme = "api://"
+
+	if !strings.HasPrefix(strings.ToLower(a), scheme) || !strings.HasPrefix(strings.ToLower(b), scheme) {
+		return a == b
+	}
+
+	hostA, restA, hasPathA := strings.Cut(a[len(scheme):], "/")
+	hostB, restB, hasPathB := strings.Cut(b[len(scheme):], "/")
+
+	return strings.EqualFold(hostA, hostB) && hasPathA == hasPathB && restA == restB
 }
 
 // findScopeByName returns the exposed OAuth2 permission scope with the given
