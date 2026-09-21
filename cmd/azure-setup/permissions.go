@@ -98,24 +98,13 @@ func configureAPIPermissions(ctx context.Context, client *msgraphsdk.GraphServic
 // Resolving at runtime keeps the role IDs out of the source: a name Graph does
 // not recognize fails with a readable error instead of a rejected PATCH.
 func resolveGraphAppRoles(ctx context.Context, client *msgraphsdk.GraphServiceClient, names []string) ([]requiredPermission, error) {
-	filter := fmt.Sprintf("appId eq '%s'", GraphResourceID)
-
-	principals, err := client.ServicePrincipals().Get(ctx, &serviceprincipals.ServicePrincipalsRequestBuilderGetRequestConfiguration{
-		QueryParameters: &serviceprincipals.ServicePrincipalsRequestBuilderGetQueryParameters{
-			Filter: &filter,
-			Select: []string{"id", "appId", "appRoles"},
-		},
-	})
+	graphSP, err := findGraphServicePrincipal(ctx, client)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to read the Microsoft Graph service principal")
 	}
 
-	if principals == nil || len(principals.GetValue()) == 0 {
-		return nil, errors.New("the Microsoft Graph service principal was not found in this tenant")
-	}
-
 	available := make(map[string]string)
-	for _, role := range principals.GetValue()[0].GetAppRoles() {
+	for _, role := range graphSP.GetAppRoles() {
 		if role.GetValue() != nil && role.GetId() != nil {
 			available[*role.GetValue()] = role.GetId().String()
 		}

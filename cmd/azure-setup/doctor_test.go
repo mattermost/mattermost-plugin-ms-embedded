@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -1089,4 +1090,32 @@ func TestRenderDoctorReportFlagsAnIncompleteRun(t *testing.T) {
 	output := buf.String()
 	assert.Contains(t, output, "1 check(s) could not run, so this report is incomplete.")
 	assert.NotContains(t, output, "Everything checks out")
+}
+
+func TestIteratePagesToleratesANilCollection(t *testing.T) {
+	// The generated SDK returns a literal nil for the interface return type on
+	// an empty body ("if res == nil { return nil, nil }"), not a typed nil
+	// pointer, so the guard in iteratePages sees a genuinely nil interface.
+	// Callers rely on that: a 204 must read as "no results", not as a failed
+	// check.
+	var grants models.OAuth2PermissionGrantCollectionResponseable
+
+	visited := 0
+	err := iteratePages(context.Background(), nil, grants,
+		models.CreateOAuth2PermissionGrantCollectionResponseFromDiscriminatorValue,
+		func(models.OAuth2PermissionGrantable) { visited++ })
+
+	require.NoError(t, err)
+	assert.Zero(t, visited)
+}
+
+func TestReadConsentStateWithoutAServicePrincipal(t *testing.T) {
+	state := readConsentState(context.Background(), nil, nil, nil, nil, nil)
+
+	require.ErrorIs(t, state.DelegatedErr, errNoServicePrincipal)
+	require.ErrorIs(t, state.AppRoleErr, errNoServicePrincipal)
+
+	app := healthyApp(t)
+	assert.Equal(t, StatusSkip, checkDelegatedConsent(state, app, "portal.azure.com").Status)
+	assert.Equal(t, StatusSkip, checkAppRoleConsent(state, app, "portal.azure.com").Status)
 }
