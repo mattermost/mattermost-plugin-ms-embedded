@@ -65,6 +65,10 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	if flagSecretWarningDays < 0 {
+		return errors.Errorf("invalid --secret-warning-days %d: must be zero or greater (zero suppresses expiry warnings)", flagSecretWarningDays)
+	}
+
 	report := &DoctorReport{
 		GeneratedAt:       time.Now().UTC().Format("2006-01-02 15:04:05 MST"),
 		ToolVersion:       version,

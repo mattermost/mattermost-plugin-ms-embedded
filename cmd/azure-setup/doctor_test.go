@@ -132,6 +132,21 @@ func healthyInputs(t *testing.T) doctorInputs {
 	}
 }
 
+// statusOfCheck returns the status of the named check from a full run.
+func statusOfCheck(t *testing.T, checks []CheckResult, name string) CheckStatus {
+	t.Helper()
+
+	for _, check := range checks {
+		if check.Name == name {
+			return check.Status
+		}
+	}
+
+	t.Fatalf("check %q not found in %d results", name, len(checks))
+
+	return ""
+}
+
 func TestRunDoctorChecksHealthyApplication(t *testing.T) {
 	checks := runDoctorChecks(healthyInputs(t))
 
@@ -470,6 +485,36 @@ func TestCheckClientSecrets(t *testing.T) {
 		})
 
 		assert.Equal(t, StatusFail, checkClientSecrets(app, now, 30).Status)
+	})
+
+	t.Run("a zero window suppresses the expiry warning", func(t *testing.T) {
+		// The flag defaults to DefaultSecretWarningDays, so a zero reaching the
+		// checks can only be an operator explicitly opting out.
+		app := healthyApp(t)
+		app.SetPasswordCredentials([]models.PasswordCredentialable{
+			passwordCredential("expiring tomorrow", now.AddDate(0, 0, 1)),
+		})
+
+		in := healthyInputs(t)
+		in.App = app
+		in.Now = now
+		in.SecretWarningDays = 0
+
+		assert.Equal(t, StatusPass, statusOfCheck(t, runDoctorChecks(in), "Client secrets"))
+	})
+
+	t.Run("a negative window falls back to the default", func(t *testing.T) {
+		app := healthyApp(t)
+		app.SetPasswordCredentials([]models.PasswordCredentialable{
+			passwordCredential("expiring tomorrow", now.AddDate(0, 0, 1)),
+		})
+
+		in := healthyInputs(t)
+		in.App = app
+		in.Now = now
+		in.SecretWarningDays = -1
+
+		assert.Equal(t, StatusWarn, statusOfCheck(t, runDoctorChecks(in), "Client secrets"))
 	})
 
 	t.Run("only secret expires soon", func(t *testing.T) {

@@ -77,7 +77,9 @@ type doctorInputs struct {
 // runDoctorChecks evaluates every configuration rule against the data gathered
 // from Azure and returns the results in report order.
 func runDoctorChecks(in doctorInputs) []CheckResult {
-	if in.SecretWarningDays <= 0 {
+	// Zero is a deliberate request to suppress expiry warnings and is honoured;
+	// only a negative window is meaningless and falls back to the default.
+	if in.SecretWarningDays < 0 {
 		in.SecretWarningDays = DefaultSecretWarningDays
 	}
 
