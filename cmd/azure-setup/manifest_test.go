@@ -18,9 +18,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// realManifestPath is a genuine published manifest kept in the repo, used in
+// realManifestPath is a copy of a genuine published manifest, used in
 // preference to an invented fixture so the tests track the real shape.
-const realManifestPath = "../../appstore/com.mattermost.ms.embedded-1.0.8/manifest.json"
+//
+// It lives in testdata rather than being read out of appstore/ because not
+// every directory there is tracked, and a test must not depend on a file that
+// is absent from a fresh clone.
+const realManifestPath = "testdata/manifest.json"
 
 const (
 	realManifestAppID    = "97e1dd8c-aa8e-4253-9bff-6b70dbf0d7e3"
