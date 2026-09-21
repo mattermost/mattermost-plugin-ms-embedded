@@ -1,8 +1,8 @@
 {
     "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.22/MicrosoftTeams.schema.json",
-    "version": "1.1.0",
+    "version": "1.0.8",
     "manifestVersion": "1.22",
-    "id": "b5f44ca1-af3f-4928-892f-63aa09d3527a",
+    "id": "97e1dd8c-aa8e-4253-9bff-6b70dbf0d7e3",
     "name": {
         "short": "Community for Mattermost",
         "full": "Community for Mattermost"
@@ -10,7 +10,7 @@
     "developer": {
         "name": "Mattermost",
         "mpnId": "",
-        "websiteUrl": "https://mattermost.com/",
+        "websiteUrl": "https://mattermost.com",
         "privacyUrl": "https://mattermost.com/privacy-policy/",
         "termsOfUseUrl": "https://mattermost.com/software-services-license-agreement/"
     },
@@ -19,8 +19,8 @@
         "full": "The Community for Mattermost app for Microsoft 365 provides seamless access to the public Community for Mattermost instance from inside the tools you use every day. Join thousands of Mattermost users, contributors, and staff members in a vibrant community where you can ask questions, get support, share ideas, and contribute to shaping the future of Mattermost.\n\nKey Features:\n- Direct Access: Access the Community for Mattermost directly from a tab without switching applications or opening a browser\n- Seamless Integration: Experience the full functionality of Community for Mattermost within a familiar interface\n- Real-time Collaboration: Engage with the Community for Mattermost in real-time discussions on product features, technical questions, and best practices\n- Product Support: Get help from both Mattermost staff and experienced community members\n- Contribute to Development: Participate in discussions that shape the future direction of Mattermost products\n- Knowledge Sharing: Learn implementation strategies and best practices from a diverse community of users\n- Stay Updated: Keep up with the latest Mattermost announcements, updates, and roadmap information\n\nThis app is designed to work with Microsoft 365, Outlook and Microsoft Teams. A free account is required to use Community for Mattermost.\n\nAbout Mattermost: \nMattermost is a purpose-built platform for technical and operational teams working in organizations vital to national security, public safety and critical infrastructure. [https://mattermost.com/](https://mattermost.com/)"
     },
     "icons": {
-        "outline": "logo-outline.png",
-        "color": "logo-color.png"
+        "color": "icon-color.png",
+        "outline": "icon-outline.png"
     },
     "accentColor": "#1e325c",
     "staticTabs": [
@@ -41,12 +41,14 @@
             "scopes": ["personal"]
         }
     ],
-    "validDomains": ["community.mattermost.com"],
+    "validDomains": [
+        "community.mattermost.com"
+    ],
     "showLoadingIndicator": false,
     "isFullScreen": true,
     "webApplicationInfo": {
-        "id": "6717098f-f214-44b6-b537-3f1a0fdca421",
-        "resource": "api://community.mattermost.com/6717098f-f214-44b6-b537-3f1a0fdca421"
+        "id": "4ee1a558-558d-497a-b64a-bddd771292d6",
+        "resource": "api://community.mattermost.com/4ee1a558-558d-497a-b64a-bddd771292d6"
     },
     "authorization": {
         "permissions": {
@@ -58,7 +60,9 @@
             ]
         }
     },
-    "devicePermissions": ["media"],
+    "devicePermissions": [
+        "media"
+    ],
     "activities": {
         "activityTypes": [
             {
@@ -68,4 +72,4 @@
             }
         ]
     }
-}
+ }
