@@ -132,15 +132,23 @@ func describeSignedInUser(ctx context.Context, client *msgraphsdk.GraphServiceCl
 		return directory, nil
 	}
 
-	for _, member := range memberOf.GetValue() {
-		directoryRole, ok := member.(models.DirectoryRoleable)
-		if !ok || directoryRole.GetRoleTemplateId() == nil {
-			continue
-		}
+	// memberOf returns groups as well as directory roles, so a user in a
+	// well-populated tenant can easily span several pages and have their
+	// administrator role land on a later one. Reading only the first page
+	// would report a Global Administrator as holding no admin role.
+	if err = iteratePages(ctx, client, memberOf,
+		models.CreateDirectoryObjectCollectionResponseFromDiscriminatorValue,
+		func(member models.DirectoryObjectable) {
+			directoryRole, ok := member.(models.DirectoryRoleable)
+			if !ok || directoryRole.GetRoleTemplateId() == nil {
+				return
+			}
 
-		if isApplicationAdminRole(*directoryRole.GetRoleTemplateId()) {
-			directory.AdminRoles = append(directory.AdminRoles, derefString(directoryRole.GetDisplayName()))
-		}
+			if isApplicationAdminRole(*directoryRole.GetRoleTemplateId()) {
+				directory.AdminRoles = append(directory.AdminRoles, derefString(directoryRole.GetDisplayName()))
+			}
+		}); err != nil {
+		directory.RolesErr = err
 	}
 
 	return directory, nil

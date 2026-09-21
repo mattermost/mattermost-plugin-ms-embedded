@@ -321,7 +321,17 @@ func findApplicationForDoctor(ctx context.Context, client *msgraphsdk.GraphServi
 		return nil, 0, nil
 	}
 
-	return apps.GetValue()[0], len(apps.GetValue()), nil
+	// The match count decides whether the report is describing an unambiguous
+	// registration, so it has to span every page rather than the first one.
+	matches := 0
+	if err = iteratePages(ctx, client, apps,
+		models.CreateApplicationCollectionResponseFromDiscriminatorValue,
+		func(models.Applicationable) { matches++ },
+	); err != nil {
+		return nil, 0, err
+	}
+
+	return apps.GetValue()[0], matches, nil
 }
 
 // findDuplicateApplications returns the client IDs of other applications that
@@ -344,10 +354,15 @@ func findDuplicateApplications(ctx context.Context, client *msgraphsdk.GraphServ
 		return duplicates, nil
 	}
 
-	for _, app := range apps.GetValue() {
-		if otherID := derefString(app.GetAppId()); otherID != "" && !strings.EqualFold(otherID, clientID) {
-			duplicates = append(duplicates, otherID)
-		}
+	err = iteratePages(ctx, client, apps,
+		models.CreateApplicationCollectionResponseFromDiscriminatorValue,
+		func(app models.Applicationable) {
+			if otherID := derefString(app.GetAppId()); otherID != "" && !strings.EqualFold(otherID, clientID) {
+				duplicates = append(duplicates, otherID)
+			}
+		})
+	if err != nil {
+		return nil, err
 	}
 
 	return duplicates, nil
@@ -530,8 +545,13 @@ func listApplicationOwners(ctx context.Context, client *msgraphsdk.GraphServiceC
 		return names, nil
 	}
 
-	for _, owner := range owners.GetValue() {
-		names = append(names, describeDirectoryObject(owner))
+	err = iteratePages(ctx, client, owners,
+		models.CreateDirectoryObjectCollectionResponseFromDiscriminatorValue,
+		func(owner models.DirectoryObjectable) {
+			names = append(names, describeDirectoryObject(owner))
+		})
+	if err != nil {
+		return nil, err
 	}
 
 	return names, nil
