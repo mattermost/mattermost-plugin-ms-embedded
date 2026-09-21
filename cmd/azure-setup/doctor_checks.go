@@ -457,8 +457,16 @@ func checkDelegatedConsent(consent consentState, app models.Applicationable, por
 	consentLink := adminConsentURL(portalHost, derefString(app.GetAppId()))
 
 	if len(missing) > 0 {
-		result.Status = StatusFail
-		result.Summary = "Not consented: " + strings.Join(missing, ", ")
+		// The plugin authenticates to Graph app-only (server/plugin.go builds
+		// the app client, which uses a client-credentials token), so it never
+		// exercises a delegated permission. A tenant that consented only the
+		// application permissions is therefore a working install, and failing
+		// the run would turn a healthy deployment red in CI. It is still
+		// reported, because `azure-setup create` requests these and an
+		// operator who believes they were consented should know otherwise.
+		result.Status = StatusWarn
+		result.Summary = "Not consented: " + strings.Join(missing, ", ") +
+			" (the plugin authenticates app-only, so this does not block it)"
 		result.Remediation = "Grant admin consent at " + consentLink
 		return result
 	}

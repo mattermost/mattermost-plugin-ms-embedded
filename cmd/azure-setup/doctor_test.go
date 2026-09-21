@@ -389,12 +389,15 @@ func TestCheckDelegatedConsent(t *testing.T) {
 		assert.Contains(t, result.Summary, "User.Read")
 	})
 
-	t.Run("not granted", func(t *testing.T) {
+	t.Run("not granted is a warning, not a failure", func(t *testing.T) {
+		// The plugin is app-only, so an unconsented delegated permission does
+		// not stop it working and must not fail a CI health check.
 		consent := consentState{TenantWideScopes: []string{"openid"}}
 
 		result := checkDelegatedConsent(consent, app, "portal.azure.com")
-		assert.Equal(t, StatusFail, result.Status)
+		assert.Equal(t, StatusWarn, result.Status)
 		assert.Contains(t, result.Summary, "User.Read")
+		assert.Contains(t, result.Summary, "app-only")
 	})
 
 	t.Run("unreadable", func(t *testing.T) {
