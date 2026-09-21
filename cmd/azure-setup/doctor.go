@@ -202,7 +202,21 @@ func checkDirectoryRoles(directory directoryContext, identityErr error) CheckRes
 func inspectApplication(ctx context.Context, client *msgraphsdk.GraphServiceClient, env cloudenv.Environment, report *DoctorReport) error {
 	app, matches, err := findApplicationForDoctor(ctx, client, flagAppName, flagClientID)
 	if err != nil {
-		return errors.Wrap(err, "failed to search for the application")
+		// Reading the application is the one lookup every later check depends
+		// on, so the inspection stops here - but the report is still finalized
+		// and emitted. A credential that cannot read applications is precisely
+		// what the operator needs told, and returning an error instead would
+		// discard the identity checks that already passed and skip
+		// --report-file entirely.
+		report.Add(CheckResult{
+			Category:    CategoryApplication,
+			Name:        "Application registration",
+			Status:      StatusSkip,
+			Summary:     "Could not search for the application: " + err.Error(),
+			Remediation: "Grant the credential Application.Read.All, or see \"Permissions for the doctor\" in the README",
+		})
+
+		return nil
 	}
 
 	if app == nil {
