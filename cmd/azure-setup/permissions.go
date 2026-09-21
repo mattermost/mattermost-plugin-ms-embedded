@@ -237,9 +237,15 @@ func mergeExistingResourceAccess(desired []models.RequiredResourceAccessable, ap
 	return merged
 }
 
-// resourceAccessKey identifies one permission on one resource.
+// resourceAccessKey identifies one permission on one resource. Every component
+// is folded: Graph preserves whatever casing another tool or a hand-edited
+// manifest wrote, so a "scope" that does not match our "Scope" would look like
+// a different permission, get appended a second time by
+// mergeExistingResourceAccess, and have the PATCH rejected as a duplicate.
 func resourceAccessKey(resourceAppID string, access models.ResourceAccessable) string {
-	return resourceAppID + "|" + strings.ToLower(uuidString(access.GetId())) + "|" + derefString(access.GetTypeEscaped())
+	return strings.ToLower(resourceAppID) + "|" +
+		strings.ToLower(uuidString(access.GetId())) + "|" +
+		strings.ToLower(derefString(access.GetTypeEscaped()))
 }
 
 // ensureServicePrincipalExists creates a service principal for the application if it doesn't exist

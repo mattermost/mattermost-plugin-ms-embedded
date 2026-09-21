@@ -972,6 +972,27 @@ func TestMergeExistingResourceAccess(t *testing.T) {
 		assert.Contains(t, resourceIDs, otherResourceID)
 	})
 
+	t.Run("a differently cased type is the same permission", func(t *testing.T) {
+		// Graph returns the casing whoever wrote the manifest used, so a
+		// lower-case "role" must not be appended alongside our "Role" - the
+		// PATCH would be rejected for a duplicate resourceAccess entry.
+		app := healthyApp(t)
+		for _, resource := range app.GetRequiredResourceAccess() {
+			resource.SetResourceAppId(ptr(strings.ToUpper(GraphResourceID)))
+			for _, access := range resource.GetResourceAccess() {
+				access.SetTypeEscaped(ptr(strings.ToLower(derefString(access.GetTypeEscaped()))))
+			}
+		}
+
+		merged := mergeExistingResourceAccess(desired, app)
+
+		total := 0
+		for _, resource := range merged {
+			total += len(resource.GetResourceAccess())
+		}
+		assert.Equal(t, len(getRequiredPermissions()), total, "case alone must not create duplicate entries")
+	})
+
 	t.Run("an application with no permissions changes nothing", func(t *testing.T) {
 		app := healthyApp(t)
 		app.SetRequiredResourceAccess(nil)
