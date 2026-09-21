@@ -268,7 +268,14 @@ A check that could not run — because the credential cannot read the consent
 grants, for example — is reported as `SKIP` and downgrades the overall verdict to
 `warn`, never `pass`, so an incomplete report cannot be mistaken for a clean one.
 Automation that needs certainty should assert on `summary.status == "pass"` in the
-JSON output rather than on the exit code alone.
+JSON output rather than on the exit code alone. Failing to read the application
+at all is the exception: nothing was verified, so the command exits non-zero.
+
+Running with application credentials is fully supported and does not degrade the
+verdict. Microsoft Graph only exposes the signed-in user to delegated flows, so
+the report notes there is no user and omits the directory-roles check rather than
+skipping it — the doctor never writes, so the operator's own roles do not affect
+what it can determine.
 
 **Examples:**
 

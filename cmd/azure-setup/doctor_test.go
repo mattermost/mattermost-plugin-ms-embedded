@@ -13,8 +13,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mattermost/mattermost-plugin-ms-embedded/server/cloudenv"
 )
 
 const (
@@ -729,21 +732,15 @@ func TestAdminConsentURL(t *testing.T) {
 func TestCheckDirectoryRoles(t *testing.T) {
 	t.Run("holds an admin role", func(t *testing.T) {
 		directory := directoryContext{UserPrincipalName: "admin@example.com", AdminRoles: []string{"Global Administrator"}}
-		assert.Equal(t, StatusPass, checkDirectoryRoles(directory, nil).Status)
+		assert.Equal(t, StatusPass, checkDirectoryRoles(directory).Status)
 	})
 
 	t.Run("holds no admin role", func(t *testing.T) {
-		assert.Equal(t, StatusWarn, checkDirectoryRoles(directoryContext{}, nil).Status)
+		assert.Equal(t, StatusWarn, checkDirectoryRoles(directoryContext{}).Status)
 	})
 
 	t.Run("roles unreadable", func(t *testing.T) {
-		assert.Equal(t, StatusSkip, checkDirectoryRoles(directoryContext{RolesErr: assert.AnError}, nil).Status)
-	})
-
-	t.Run("identity unreadable", func(t *testing.T) {
-		result := checkDirectoryRoles(directoryContext{}, assert.AnError)
-		assert.Equal(t, StatusSkip, result.Status)
-		assert.Contains(t, result.Summary, "signed-in identity")
+		assert.Equal(t, StatusSkip, checkDirectoryRoles(directoryContext{RolesErr: assert.AnError}).Status)
 	})
 }
 
@@ -1118,4 +1115,74 @@ func TestReadConsentStateWithoutAServicePrincipal(t *testing.T) {
 	app := healthyApp(t)
 	assert.Equal(t, StatusSkip, checkDelegatedConsent(state, app, "portal.azure.com").Status)
 	assert.Equal(t, StatusSkip, checkAppRoleConsent(state, app, "portal.azure.com").Status)
+}
+
+func TestIdentityChecksWithADelegatedSignIn(t *testing.T) {
+	env := cloudenv.EnvironmentFor(cloudenv.Commercial)
+	directory := directoryContext{
+		UserPrincipalName: "admin@contoso.onmicrosoft.com",
+		AdminRoles:        []string{"Global Administrator"},
+	}
+
+	checks := identityChecks(env, directory, nil)
+
+	require.Len(t, checks, 2, "a delegated sign-in reports both the token and the user's roles")
+	assert.Equal(t, StatusPass, checks[0].Status)
+	assert.Contains(t, checks[0].Summary, "admin@contoso.onmicrosoft.com")
+	assert.Equal(t, "Directory roles", checks[1].Name)
+}
+
+func TestIdentityChecksWithApplicationCredentials(t *testing.T) {
+	// Application credentials are the documented way to run the doctor, so an
+	// absent /me must not degrade the verdict. Before this, the sign-in check
+	// warned and the roles check skipped, which made a perfectly healthy audit
+	// permanently report warn and print "this report is incomplete".
+	env := cloudenv.EnvironmentFor(cloudenv.Commercial)
+	identityErr := errors.New("/me request is only valid with delegated authentication flow")
+
+	checks := identityChecks(env, directoryContext{}, identityErr)
+
+	require.Len(t, checks, 1, "there is no user, so the roles check does not apply and is omitted")
+	assert.Equal(t, StatusPass, checks[0].Status)
+	assert.Empty(t, checks[0].Remediation, "nothing needs fixing")
+	assert.Contains(t, strings.Join(checks[0].Details, "\n"), "no signed-in user")
+}
+
+func TestAppOnlyRunCanStillReportPass(t *testing.T) {
+	report := &DoctorReport{Cloud: cloudenv.Commercial}
+
+	identityErr := errors.New("/me request is only valid with delegated authentication flow")
+	for _, check := range identityChecks(cloudenv.EnvironmentFor(cloudenv.Commercial), directoryContext{}, identityErr) {
+		report.Add(check)
+	}
+	for _, check := range runDoctorChecks(healthyInputs(t)) {
+		report.Add(check)
+	}
+	report.Finalize()
+
+	assert.Equal(t, StatusPass, report.Summary.Status,
+		"a correctly configured application audited with application credentials must report pass")
+	assert.Zero(t, report.Summary.Skipped)
+	assert.Zero(t, report.Summary.Warned)
+}
+
+func TestDoctorVerdictDistinguishesPartialFromNoInspection(t *testing.T) {
+	// A narrow credential legitimately cannot answer every question, so a
+	// handful of skips warns and exits 0. Never reaching the application is
+	// not a partial answer, it is no answer, and must not exit 0.
+	partial := &DoctorReport{ApplicationClientID: testClientID}
+	partial.Add(CheckResult{Category: CategoryApplication, Name: "Sign-in audience", Status: StatusPass, Summary: "ok"})
+	partial.Add(CheckResult{Category: CategoryConsent, Name: "Admin consent", Status: StatusSkip, Summary: "no permission"})
+	partial.Finalize()
+
+	assert.Equal(t, StatusWarn, partial.Summary.Status)
+	assert.NotEmpty(t, partial.ApplicationClientID, "the application was identified, so the run exits 0")
+
+	none := &DoctorReport{}
+	none.Add(CheckResult{Category: CategoryIdentity, Name: "Azure sign-in", Status: StatusPass, Summary: "ok"})
+	none.Add(CheckResult{Category: CategoryApplication, Name: "Application registration", Status: StatusSkip, Summary: "denied"})
+	none.Finalize()
+
+	assert.Equal(t, StatusWarn, none.Summary.Status)
+	assert.Empty(t, none.ApplicationClientID, "nothing was verified, so the run must exit non-zero")
 }

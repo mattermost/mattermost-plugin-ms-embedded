@@ -99,6 +99,14 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		return errors.Errorf("doctor found %d failing check(s)", report.Summary.Failed)
 	}
 
+	// Individual skipped checks only warn, because a deliberately narrow
+	// credential makes some of them unanswerable by design. Failing to read
+	// the application at all is different: nothing about it was verified, so
+	// exiting 0 would tell a CI job the opposite of the truth.
+	if report.ApplicationClientID == "" {
+		return errors.New("doctor could not inspect the application, so nothing about it was verified")
+	}
+
 	return nil
 }
 
@@ -125,26 +133,9 @@ func connectDoctor(ctx context.Context, env cloudenv.Environment, report *Doctor
 	directory, identityErr := describeSignedInUser(ctx, client)
 	report.SignedInAs = directory.UserPrincipalName
 
-	signIn := CheckResult{
-		Category: CategoryIdentity,
-		Name:     "Azure sign-in",
-		Status:   StatusPass,
-		Summary:  fmt.Sprintf("Acquired a Microsoft Graph token for the %s cloud as %s", env.Name, directory.UserPrincipalName),
-		Details:  []string{"Graph endpoint: " + env.GraphBaseURL},
+	for _, check := range identityChecks(env, directory, identityErr) {
+		report.Add(check)
 	}
-	if identityErr != nil {
-		// The credential type is not knowable here, so the report states what
-		// happened rather than guessing why.
-		signIn.Status = StatusWarn
-		signIn.Summary = fmt.Sprintf("Acquired a Microsoft Graph token for the %s cloud, but the signed-in identity could not be read", env.Name)
-		signIn.Details = append(signIn.Details,
-			"/me failed: "+identityErr.Error(),
-			"expected with application (client credentials) auth, which has no user context")
-		signIn.Remediation = "Ignore when authenticating with application credentials; otherwise check that the Graph /me endpoint is reachable"
-	}
-	report.Add(signIn)
-
-	report.Add(checkDirectoryRoles(directory, identityErr))
 
 	if report.TenantID == "" {
 		tenantID, tenantErr := getTenantID(ctx, client, flagVerbose)
@@ -171,16 +162,44 @@ func connectDoctor(ctx context.Context, env cloudenv.Environment, report *Doctor
 	return client, nil
 }
 
-// checkDirectoryRoles turns the signed-in user's directory roles into a check so
-// the report explains up front whether the operator can fix what it finds.
-func checkDirectoryRoles(directory directoryContext, identityErr error) CheckResult {
-	result := CheckResult{Category: CategoryIdentity, Name: "Directory roles"}
-
-	if identityErr != nil {
-		result.Status = StatusSkip
-		result.Summary = "Skipped because the signed-in identity could not be read"
-		return result
+// identityChecks describes who the tool is authenticating as.
+//
+// The signed-in identity is read with /me, which only exists for delegated
+// flows. Nothing in the audit depends on it: the doctor never writes, so the
+// operator's own roles do not affect what it can determine about the
+// application, and application credentials are the documented way to run this
+// command. Its absence is therefore reported as context and never degrades the
+// verdict - a skip here would imply something about the application went
+// unverified, and make a clean audit permanently unable to report pass.
+func identityChecks(env cloudenv.Environment, directory directoryContext, identityErr error) []CheckResult {
+	signIn := CheckResult{
+		Category: CategoryIdentity,
+		Name:     "Azure sign-in",
+		Status:   StatusPass,
+		Summary:  fmt.Sprintf("Acquired a Microsoft Graph token for the %s cloud as %s", env.Name, directory.UserPrincipalName),
+		Details:  []string{"Graph endpoint: " + env.GraphBaseURL},
 	}
+
+	if identityErr == nil {
+		return []CheckResult{signIn, checkDirectoryRoles(directory)}
+	}
+
+	signIn.Summary = fmt.Sprintf("Acquired a Microsoft Graph token for the %s cloud", env.Name)
+	signIn.Details = append(signIn.Details,
+		"no signed-in user: "+identityErr.Error(),
+		"expected with application (client credentials) auth, which has no user context")
+
+	// With no user, "which roles does the user hold" is not applicable rather
+	// than unanswered, so the check is omitted instead of skipped.
+	return []CheckResult{signIn}
+}
+
+// checkDirectoryRoles turns the signed-in user's directory roles into a check so
+// the report explains up front whether the operator can fix what it finds. It
+// is only meaningful for a delegated sign-in; callers omit it entirely when
+// there is no user.
+func checkDirectoryRoles(directory directoryContext) CheckResult {
+	result := CheckResult{Category: CategoryIdentity, Name: "Directory roles"}
 
 	if directory.RolesErr != nil {
 		result.Status = StatusSkip
