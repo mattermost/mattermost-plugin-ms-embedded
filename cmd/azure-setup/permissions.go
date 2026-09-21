@@ -19,7 +19,7 @@ import (
 // configureAPIPermissions adds the required API permissions to the application
 func configureAPIPermissions(ctx context.Context, client *msgraphsdk.GraphServiceClient, config *SetupConfig, app models.Applicationable) error {
 	if config.Verbose {
-		fmt.Println("🔑 Configuring API permissions...")
+		progressln("🔑 Configuring API permissions...")
 	}
 
 	permissions := getRequiredPermissions()
@@ -33,9 +33,9 @@ func configureAPIPermissions(ctx context.Context, client *msgraphsdk.GraphServic
 	}
 
 	if config.DryRun {
-		fmt.Println("   [DRY RUN] Would configure the following API permissions:")
+		progressln("   [DRY RUN] Would configure the following API permissions:")
 		for _, perm := range permissions {
-			fmt.Printf("      - %s (%s)\n", perm.Name, permissionKindLabel(perm.Type))
+			progressf("      - %s (%s)\n", perm.Name, permissionKindLabel(perm.Type))
 		}
 		return nil
 	}
@@ -58,19 +58,19 @@ func configureAPIPermissions(ctx context.Context, client *msgraphsdk.GraphServic
 	}
 
 	if config.Verbose {
-		fmt.Println("✅ API permissions configured:")
+		progressln("✅ API permissions configured:")
 		for _, perm := range permissions {
-			fmt.Printf("   ✓ %s (%s)\n", perm.Name, permissionKindLabel(perm.Type))
+			progressf("   ✓ %s (%s)\n", perm.Name, permissionKindLabel(perm.Type))
 		}
 	}
 
 	// Create service principal to enable admin consent
 	if err := ensureServicePrincipalExists(ctx, client, config, app); err != nil {
-		fmt.Printf("\n⚠️  WARNING: Could not create service principal: %v\n", err)
-		fmt.Println("   The service principal is required for admin consent to work properly")
-		fmt.Println("   You may need to create it manually in the Azure Portal")
+		progressf("\n⚠️  WARNING: Could not create service principal: %v\n", err)
+		progressln("   The service principal is required for admin consent to work properly")
+		progressln("   You may need to create it manually in the Azure Portal")
 		if config.Verbose {
-			fmt.Printf("   Error details: %v\n", err)
+			progressf("   Error details: %v\n", err)
 		}
 	}
 
@@ -231,7 +231,7 @@ func resourceAccessKey(resourceAppID string, access models.ResourceAccessable) s
 // Note: This does NOT automatically grant admin consent - that must be done manually in the Azure Portal
 func ensureServicePrincipalExists(ctx context.Context, client *msgraphsdk.GraphServiceClient, config *SetupConfig, app models.Applicationable) error {
 	if config.Verbose {
-		fmt.Println("🔐 Ensuring service principal exists for admin consent...")
+		progressln("🔐 Ensuring service principal exists for admin consent...")
 	}
 
 	appID := *app.GetAppId()
@@ -256,7 +256,7 @@ func ensureServicePrincipalExists(ctx context.Context, client *msgraphsdk.GraphS
 	if servicePrincipals == nil || servicePrincipals.GetValue() == nil || len(servicePrincipals.GetValue()) == 0 {
 		// Create service principal
 		if config.Verbose {
-			fmt.Println("   Creating service principal...")
+			progressln("   Creating service principal...")
 		}
 
 		newSP := models.NewServicePrincipal()
@@ -275,17 +275,17 @@ func ensureServicePrincipalExists(ctx context.Context, client *msgraphsdk.GraphS
 		})
 
 		if config.Verbose {
-			fmt.Println("   ✅ Service principal created")
+			progressln("   ✅ Service principal created")
 		}
 	} else if config.Verbose {
-		fmt.Println("   ✅ Service principal already exists")
+		progressln("   ✅ Service principal already exists")
 	}
 
 	if config.Verbose {
 		// Validate UUID before constructing URL
 		if _, err := uuid.Parse(appID); err == nil {
-			fmt.Printf("✅ Admin consent must be granted manually\n")
-			fmt.Printf("   Visit: %s\n", adminConsentURL(config.cloudEnvironment().PortalHost, appID))
+			progressf("✅ Admin consent must be granted manually\n")
+			progressf("   Visit: %s\n", adminConsentURL(config.cloudEnvironment().PortalHost, appID))
 		}
 	}
 
@@ -295,7 +295,7 @@ func ensureServicePrincipalExists(ctx context.Context, client *msgraphsdk.GraphS
 // deleteServicePrincipal deletes a service principal (used for rollback)
 func deleteServicePrincipal(ctx context.Context, client *msgraphsdk.GraphServiceClient, objectID string, verbose bool) error {
 	if verbose {
-		fmt.Printf("🗑️  Rolling back: Deleting service principal %s\n", objectID)
+		progressf("🗑️  Rolling back: Deleting service principal %s\n", objectID)
 	}
 
 	err := client.ServicePrincipals().ByServicePrincipalId(objectID).Delete(ctx, nil)

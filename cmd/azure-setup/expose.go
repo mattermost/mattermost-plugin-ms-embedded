@@ -5,7 +5,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/google/uuid"
 	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
@@ -16,7 +15,7 @@ import (
 // configureAPIExposure configures the Application ID URI, scopes, and pre-authorized applications
 func configureAPIExposure(ctx context.Context, client *msgraphsdk.GraphServiceClient, config *SetupConfig, app models.Applicationable) error {
 	if config.Verbose {
-		fmt.Println("🌐 Configuring API exposure...")
+		progressln("🌐 Configuring API exposure...")
 	}
 
 	// Build the Application ID URI
@@ -26,12 +25,12 @@ func configureAPIExposure(ctx context.Context, client *msgraphsdk.GraphServiceCl
 	}
 
 	if config.DryRun {
-		fmt.Println("   [DRY RUN] Would configure API exposure:")
-		fmt.Printf("      Application ID URI: %s\n", appIDURI)
-		fmt.Printf("      Scope: %s\n", ScopeName)
-		fmt.Println("      Pre-authorized clients:")
+		progressln("   [DRY RUN] Would configure API exposure:")
+		progressf("      Application ID URI: %s\n", appIDURI)
+		progressf("      Scope: %s\n", ScopeName)
+		progressln("      Pre-authorized clients:")
 		for _, clientID := range getPreAuthorizedClients() {
-			fmt.Printf("         - %s\n", clientID)
+			progressf("         - %s\n", clientID)
 		}
 		return nil
 	}
@@ -108,14 +107,14 @@ func configureAPIExposure(ctx context.Context, client *msgraphsdk.GraphServiceCl
 	}
 
 	if config.Verbose {
-		fmt.Println("✅ API exposure configured:")
-		fmt.Printf("   ✓ Application ID URI: %s\n", appIDURI)
-		fmt.Printf("   ✓ Scope: %s\n", ScopeName)
-		fmt.Println("   ✓ Pre-authorized clients:")
-		fmt.Println("      - Microsoft Teams Web")
-		fmt.Println("      - Microsoft Teams Desktop")
-		fmt.Println("      - Microsoft Outlook Web")
-		fmt.Println("      - Microsoft Outlook Desktop")
+		progressln("✅ API exposure configured:")
+		progressf("   ✓ Application ID URI: %s\n", appIDURI)
+		progressf("   ✓ Scope: %s\n", ScopeName)
+		progressln("   ✓ Pre-authorized clients:")
+		progressln("      - Microsoft Teams Web")
+		progressln("      - Microsoft Teams Desktop")
+		progressln("      - Microsoft Outlook Web")
+		progressln("      - Microsoft Outlook Desktop")
 	}
 
 	return nil

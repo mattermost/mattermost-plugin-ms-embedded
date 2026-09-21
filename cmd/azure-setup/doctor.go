@@ -74,7 +74,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		PortalHost:        env.PortalHost,
 	}
 
-	fmt.Fprintln(os.Stderr, "🩺 Running Azure configuration doctor...")
+	progressln("🩺 Running Azure configuration doctor...")
 
 	client, err := connectDoctor(ctx, env, report)
 	if err != nil {
@@ -583,7 +583,7 @@ func emitDoctorReport(report *DoctorReport, format, reportFile string) error {
 		return errors.Wrapf(err, "failed to write report file %s", reportFile)
 	}
 
-	fmt.Fprintf(os.Stderr, "\n📄 Report written to %s\n", reportFile)
+	progressf("\n📄 Report written to %s\n", reportFile)
 
 	return nil
 }

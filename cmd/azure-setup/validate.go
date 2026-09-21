@@ -153,7 +153,7 @@ func describeSignedInUser(ctx context.Context, client *msgraphsdk.GraphServiceCl
 // proceed and fail on the actual Graph call if permissions turn out to be too narrow.
 func validatePermissions(ctx context.Context, client *msgraphsdk.GraphServiceClient, verbose bool) error {
 	if verbose {
-		fmt.Println("🔍 Checking user permissions...")
+		progressln("🔍 Checking user permissions...")
 	}
 
 	directory, err := describeSignedInUser(ctx, client)
@@ -162,29 +162,29 @@ func validatePermissions(ctx context.Context, client *msgraphsdk.GraphServiceCli
 	}
 
 	if verbose {
-		fmt.Printf("   Authenticated as: %s\n", directory.UserPrincipalName)
+		progressf("   Authenticated as: %s\n", directory.UserPrincipalName)
 	}
 
 	if directory.RolesErr != nil {
 		// Always show this warning as it's important for users to know
-		fmt.Println("⚠️  Warning: Could not check directory roles")
+		progressln("⚠️  Warning: Could not check directory roles")
 		if verbose {
-			fmt.Printf("   Error details: %v\n", directory.RolesErr)
+			progressf("   Error details: %v\n", directory.RolesErr)
 		}
 		return nil
 	}
 
 	if len(directory.AdminRoles) == 0 {
 		// Always show this warning as it's critical for users to know
-		fmt.Println("⚠️  Warning: User may not have Application Administrator permissions")
-		fmt.Println("   Setup will proceed, but may fail if permissions are insufficient")
-		fmt.Println("   Required role: Application Administrator, Cloud Application Administrator, or Global Administrator")
+		progressln("⚠️  Warning: User may not have Application Administrator permissions")
+		progressln("   Setup will proceed, but may fail if permissions are insufficient")
+		progressln("   Required role: Application Administrator, Cloud Application Administrator, or Global Administrator")
 		return nil
 	}
 
 	if verbose {
-		fmt.Printf("   ✅ User has admin role: %s\n", strings.Join(directory.AdminRoles, ", "))
-		fmt.Println("✅ User has sufficient permissions")
+		progressf("   ✅ User has admin role: %s\n", strings.Join(directory.AdminRoles, ", "))
+		progressln("✅ User has sufficient permissions")
 	}
 
 	return nil
@@ -212,7 +212,7 @@ func escapeODataString(s string) string {
 // checkExistingApp checks if an application with the given name or client ID already exists
 func checkExistingApp(ctx context.Context, client *msgraphsdk.GraphServiceClient, appName, clientID string, verbose bool) (models.Applicationable, error) {
 	if verbose {
-		fmt.Println("🔍 Checking for existing application...")
+		progressln("🔍 Checking for existing application...")
 	}
 
 	var filter string
@@ -241,14 +241,14 @@ func checkExistingApp(ctx context.Context, client *msgraphsdk.GraphServiceClient
 
 	if apps == nil || apps.GetValue() == nil || len(apps.GetValue()) == 0 {
 		if verbose {
-			fmt.Println("   No existing application found")
+			progressln("   No existing application found")
 		}
 		return nil, nil
 	}
 
 	existingApp := apps.GetValue()[0]
 	if verbose {
-		fmt.Printf("   ✅ Found existing application: %s (ID: %s)\n",
+		progressf("   ✅ Found existing application: %s (ID: %s)\n",
 			*existingApp.GetDisplayName(),
 			*existingApp.GetAppId())
 	}
@@ -288,7 +288,7 @@ func buildApplicationIDURI(siteURL, clientID string) (string, error) {
 // getTenantID retrieves the tenant ID from the Azure organization
 func getTenantID(ctx context.Context, client *msgraphsdk.GraphServiceClient, verbose bool) (string, error) {
 	if verbose {
-		fmt.Println("🔍 Retrieving tenant ID from Azure...")
+		progressln("🔍 Retrieving tenant ID from Azure...")
 	}
 
 	// Get organization details to retrieve tenant ID
@@ -308,7 +308,7 @@ func getTenantID(ctx context.Context, client *msgraphsdk.GraphServiceClient, ver
 	}
 
 	if verbose {
-		fmt.Printf("   ✅ Tenant ID: %s\n", *tenantID)
+		progressf("   ✅ Tenant ID: %s\n", *tenantID)
 	}
 
 	return *tenantID, nil

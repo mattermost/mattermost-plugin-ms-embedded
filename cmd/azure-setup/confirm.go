@@ -5,7 +5,6 @@ package main
 
 import (
 	"bufio"
-	"fmt"
 	"os"
 	"strings"
 
@@ -15,53 +14,53 @@ import (
 
 // showPreflightConfirmation displays a summary of planned changes and prompts for confirmation
 func showPreflightConfirmation(config *SetupConfig, existingApp models.Applicationable) error {
-	fmt.Println("\n" + strings.Repeat("=", 70))
-	fmt.Println("🔍 PRE-FLIGHT CHECK")
-	fmt.Println(strings.Repeat("=", 70))
+	progressln("\n" + strings.Repeat("=", 70))
+	progressln("🔍 PRE-FLIGHT CHECK")
+	progressln(strings.Repeat("=", 70))
 
 	if existingApp != nil {
-		fmt.Println("\n📝 Action: Update existing Azure application")
-		fmt.Printf("   Application Name: %s\n", *existingApp.GetDisplayName())
-		fmt.Printf("   Application ID:   %s\n", *existingApp.GetAppId())
+		progressln("\n📝 Action: Update existing Azure application")
+		progressf("   Application Name: %s\n", *existingApp.GetDisplayName())
+		progressf("   Application ID:   %s\n", *existingApp.GetAppId())
 	} else {
-		fmt.Println("\n🆕 Action: Create new Azure application")
-		fmt.Printf("   Application Name: %s\n", config.AppName)
+		progressln("\n🆕 Action: Create new Azure application")
+		progressf("   Application Name: %s\n", config.AppName)
 	}
 
-	fmt.Println("\n📋 Configuration Summary:")
-	fmt.Printf("   Mattermost Site URL:    %s\n", config.MattermostSiteURL)
-	fmt.Printf("   Secret Expiration:      %d months\n", config.SecretExpiration)
+	progressln("\n📋 Configuration Summary:")
+	progressf("   Mattermost Site URL:    %s\n", config.MattermostSiteURL)
+	progressf("   Secret Expiration:      %d months\n", config.SecretExpiration)
 
-	fmt.Println("\n🔐 API Permissions to configure:")
+	progressln("\n🔐 API Permissions to configure:")
 	for _, perm := range getRequiredPermissions() {
 		permType := "Delegated"
 		if perm.Type == PermissionTypeRole {
 			permType = "Application"
 		}
-		fmt.Printf("   • %s (%s)\n", perm.Name, permType)
+		progressf("   • %s (%s)\n", perm.Name, permType)
 	}
 
-	fmt.Println("\n🌐 API Exposure:")
+	progressln("\n🌐 API Exposure:")
 	appIDURI, _ := buildApplicationIDURI(config.MattermostSiteURL, "CLIENT_ID")
 	appIDURI = strings.Replace(appIDURI, "CLIENT_ID", "{client-id}", 1)
-	fmt.Printf("   • Application ID URI: %s\n", appIDURI)
-	fmt.Printf("   • Scope: %s\n", ScopeName)
-	fmt.Printf("   • Pre-authorized clients: %d Microsoft apps (Teams, Outlook, Office, Copilot)\n", len(getPreAuthorizedClients()))
+	progressf("   • Application ID URI: %s\n", appIDURI)
+	progressf("   • Scope: %s\n", ScopeName)
+	progressf("   • Pre-authorized clients: %d Microsoft apps (Teams, Outlook, Office, Copilot)\n", len(getPreAuthorizedClients()))
 
-	fmt.Println("\n🔑 Operations to perform:")
+	progressln("\n🔑 Operations to perform:")
 	if existingApp == nil {
-		fmt.Println("   1. Create new Azure AD application")
+		progressln("   1. Create new Azure AD application")
 	} else {
-		fmt.Println("   1. Update existing Azure AD application")
+		progressln("   1. Update existing Azure AD application")
 	}
-	fmt.Println("   2. Configure API permissions")
-	fmt.Println("   3. Set up API exposure and scopes")
-	fmt.Println("   4. Add pre-authorized Microsoft clients")
-	fmt.Println("   5. Generate new client secret")
-	fmt.Println("   6. Create service principal (if needed)")
+	progressln("   2. Configure API permissions")
+	progressln("   3. Set up API exposure and scopes")
+	progressln("   4. Add pre-authorized Microsoft clients")
+	progressln("   5. Generate new client secret")
+	progressln("   6. Create service principal (if needed)")
 
-	fmt.Println("\n" + strings.Repeat("=", 70))
-	fmt.Print("\nProceed with these changes? [y/N]: ")
+	progressln("\n" + strings.Repeat("=", 70))
+	progress("\nProceed with these changes? [y/N]: ")
 
 	reader := bufio.NewReader(os.Stdin)
 	response, err := reader.ReadString('\n')
@@ -71,10 +70,10 @@ func showPreflightConfirmation(config *SetupConfig, existingApp models.Applicati
 
 	response = strings.TrimSpace(strings.ToLower(response))
 	if response != "y" && response != "yes" {
-		fmt.Println("\n❌ Operation cancelled by user")
+		progressln("\n❌ Operation cancelled by user")
 		return errors.New("operation cancelled by user")
 	}
 
-	fmt.Println()
+	progressln()
 	return nil
 }

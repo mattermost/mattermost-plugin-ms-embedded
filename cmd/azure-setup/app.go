@@ -5,7 +5,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 
 	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
@@ -16,14 +15,14 @@ import (
 func createOrUpdateApp(ctx context.Context, client *msgraphsdk.GraphServiceClient, config *SetupConfig, existingApp models.Applicationable) (models.Applicationable, bool, error) {
 	if existingApp != nil {
 		if config.Verbose {
-			fmt.Println("📝 Updating existing application...")
+			progressln("📝 Updating existing application...")
 		}
 		app, err := updateApplication(ctx, client, config, existingApp)
 		return app, false, err
 	}
 
 	if config.Verbose {
-		fmt.Println("🆕 Creating new application...")
+		progressln("🆕 Creating new application...")
 	}
 	app, err := createApplication(ctx, client, config)
 	return app, true, err
@@ -32,7 +31,7 @@ func createOrUpdateApp(ctx context.Context, client *msgraphsdk.GraphServiceClien
 // createApplication creates a new Azure AD application registration
 func createApplication(ctx context.Context, client *msgraphsdk.GraphServiceClient, config *SetupConfig) (models.Applicationable, error) {
 	if config.DryRun {
-		fmt.Println("   [DRY RUN] Would create new application:", config.AppName)
+		progressln("   [DRY RUN] Would create new application:", config.AppName)
 		// Return a mock app for dry run
 		mockApp := models.NewApplication()
 		displayName := config.AppName
@@ -59,9 +58,9 @@ func createApplication(ctx context.Context, client *msgraphsdk.GraphServiceClien
 	}
 
 	if config.Verbose {
-		fmt.Printf("✅ Application created: %s\n", *createdApp.GetDisplayName())
-		fmt.Printf("   Client ID: %s\n", *createdApp.GetAppId())
-		fmt.Printf("   Object ID: %s\n", *createdApp.GetId())
+		progressf("✅ Application created: %s\n", *createdApp.GetDisplayName())
+		progressf("   Client ID: %s\n", *createdApp.GetAppId())
+		progressf("   Object ID: %s\n", *createdApp.GetId())
 	}
 
 	// Add to rollback list
@@ -75,7 +74,7 @@ func createApplication(ctx context.Context, client *msgraphsdk.GraphServiceClien
 // updateApplication updates an existing Azure AD application registration
 func updateApplication(ctx context.Context, client *msgraphsdk.GraphServiceClient, config *SetupConfig, existingApp models.Applicationable) (models.Applicationable, error) {
 	if config.DryRun {
-		fmt.Println("   [DRY RUN] Would update existing application:", *existingApp.GetDisplayName())
+		progressln("   [DRY RUN] Would update existing application:", *existingApp.GetDisplayName())
 		return existingApp, nil
 	}
 
@@ -89,23 +88,23 @@ func updateApplication(ctx context.Context, client *msgraphsdk.GraphServiceClien
 		appUpdate.SetSignInAudience(&expectedAudience)
 		needsUpdate = true
 		if config.Verbose {
-			fmt.Printf("   ⚙️  Will update sign-in audience to: %s\n", expectedAudience)
+			progressf("   ⚙️  Will update sign-in audience to: %s\n", expectedAudience)
 		}
 	}
 
 	// If no updates needed, return the existing app as-is
 	if !needsUpdate {
 		if config.Verbose {
-			fmt.Printf("✅ Existing application is already configured correctly: %s\n", *existingApp.GetDisplayName())
-			fmt.Printf("   Client ID: %s\n", *existingApp.GetAppId())
-			fmt.Printf("   Object ID: %s\n", *existingApp.GetId())
+			progressf("✅ Existing application is already configured correctly: %s\n", *existingApp.GetDisplayName())
+			progressf("   Client ID: %s\n", *existingApp.GetAppId())
+			progressf("   Object ID: %s\n", *existingApp.GetId())
 		}
 		return existingApp, nil
 	}
 
 	// Apply updates
 	if config.Verbose {
-		fmt.Printf("📝 Updating application configuration: %s\n", *existingApp.GetDisplayName())
+		progressf("📝 Updating application configuration: %s\n", *existingApp.GetDisplayName())
 	}
 
 	updatedApp, err := client.Applications().ByApplicationId(*existingApp.GetId()).Patch(ctx, appUpdate, nil)
@@ -122,9 +121,9 @@ func updateApplication(ctx context.Context, client *msgraphsdk.GraphServiceClien
 	}
 
 	if config.Verbose {
-		fmt.Printf("✅ Application updated: %s\n", derefString(updatedApp.GetDisplayName()))
-		fmt.Printf("   Client ID: %s\n", derefString(updatedApp.GetAppId()))
-		fmt.Printf("   Object ID: %s\n", derefString(updatedApp.GetId()))
+		progressf("✅ Application updated: %s\n", derefString(updatedApp.GetDisplayName()))
+		progressf("   Client ID: %s\n", derefString(updatedApp.GetAppId()))
+		progressf("   Object ID: %s\n", derefString(updatedApp.GetId()))
 	}
 
 	return updatedApp, nil
@@ -133,7 +132,7 @@ func updateApplication(ctx context.Context, client *msgraphsdk.GraphServiceClien
 // deleteApplication deletes an application (used for rollback)
 func deleteApplication(ctx context.Context, client *msgraphsdk.GraphServiceClient, objectID string, verbose bool) error {
 	if verbose {
-		fmt.Printf("🗑️  Rolling back: Deleting application %s\n", objectID)
+		progressf("🗑️  Rolling back: Deleting application %s\n", objectID)
 	}
 
 	err := client.Applications().ByApplicationId(objectID).Delete(ctx, nil)

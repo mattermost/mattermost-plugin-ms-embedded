@@ -5,8 +5,6 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"os"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
@@ -22,7 +20,7 @@ import (
 // Priority order: Environment variables -> Azure CLI -> Interactive browser
 func authenticateToAzure(ctx context.Context, env cloudenv.Environment, tenantID string, verbose bool) (azcore.TokenCredential, error) {
 	if verbose {
-		fmt.Println("🔐 Authenticating to Azure...")
+		progressln("🔐 Authenticating to Azure...")
 	}
 
 	// Try multiple authentication methods in order of preference
@@ -32,7 +30,7 @@ func authenticateToAzure(ctx context.Context, env cloudenv.Environment, tenantID
 	}
 
 	if verbose {
-		fmt.Printf("✅ Successfully authenticated using: %s\n", method)
+		progressf("✅ Successfully authenticated using: %s\n", method)
 	}
 
 	return credential, nil
@@ -42,7 +40,7 @@ func authenticateToAzure(ctx context.Context, env cloudenv.Environment, tenantID
 func tryAuthenticationMethods(ctx context.Context, env cloudenv.Environment, tenantID string, verbose bool) (azcore.TokenCredential, string, error) {
 	// Method 1: Try environment variables (service principal)
 	if verbose {
-		fmt.Println("   Trying: Environment variables (Service Principal)...")
+		progressln("   Trying: Environment variables (Service Principal)...")
 	}
 	if cred, err := tryEnvironmentCredential(env); err == nil {
 		if err := testCredential(ctx, env, cred); err == nil {
@@ -52,7 +50,7 @@ func tryAuthenticationMethods(ctx context.Context, env cloudenv.Environment, ten
 
 	// Method 2: Try Azure CLI
 	if verbose {
-		fmt.Println("   Trying: Azure CLI...")
+		progressln("   Trying: Azure CLI...")
 	}
 	if cred, err := tryAzureCLICredential(tenantID); err == nil {
 		if err := testCredential(ctx, env, cred); err == nil {
@@ -62,7 +60,7 @@ func tryAuthenticationMethods(ctx context.Context, env cloudenv.Environment, ten
 
 	// Method 3: Try interactive browser
 	if verbose {
-		fmt.Println("   Trying: Interactive browser...")
+		progressln("   Trying: Interactive browser...")
 	}
 	if cred, err := tryInteractiveBrowserCredential(env, tenantID); err == nil {
 		if err := testCredential(ctx, env, cred); err == nil {
@@ -72,7 +70,7 @@ func tryAuthenticationMethods(ctx context.Context, env cloudenv.Environment, ten
 
 	// Method 4: Device code flow (last resort, works on headless systems)
 	if verbose {
-		fmt.Println("   Trying: Device code flow...")
+		progressln("   Trying: Device code flow...")
 	}
 	if cred, err := tryDeviceCodeCredential(env, tenantID); err == nil {
 		if err := testCredential(ctx, env, cred); err == nil {
@@ -139,7 +137,7 @@ func tryDeviceCodeCredential(env cloudenv.Environment, tenantID string) (azcore.
 		UserPrompt: func(ctx context.Context, message azidentity.DeviceCodeMessage) error {
 			// stderr, so the prompt reaches the operator without corrupting a
 			// report being piped from stdout (doctor -o json).
-			fmt.Fprintln(os.Stderr, "\n"+message.Message)
+			progressln("\n" + message.Message)
 			return nil
 		},
 	}
@@ -168,7 +166,7 @@ func testCredential(ctx context.Context, env cloudenv.Environment, cred azcore.T
 // validateAzureConnection ensures we can connect to Azure and get basic info
 func validateAzureConnection(ctx context.Context, env cloudenv.Environment, cred azcore.TokenCredential, verbose bool) error {
 	if verbose {
-		fmt.Println("🔍 Validating Azure connection...")
+		progressln("🔍 Validating Azure connection...")
 	}
 
 	// Try to get a token to verify the connection works
@@ -184,7 +182,7 @@ func validateAzureConnection(ctx context.Context, env cloudenv.Environment, cred
 	}
 
 	if verbose {
-		fmt.Println("✅ Azure connection validated")
+		progressln("✅ Azure connection validated")
 	}
 
 	return nil

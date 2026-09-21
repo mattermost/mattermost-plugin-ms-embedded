@@ -5,7 +5,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"time"
 
@@ -21,7 +20,7 @@ var version = "dev"
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		progressf("Error: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -262,7 +261,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	fmt.Println("🔍 Validating Azure credentials and permissions...")
+	progressln("🔍 Validating Azure credentials and permissions...")
 
 	env, err := resolveCloud(flagCloud)
 	if err != nil {
@@ -290,7 +289,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "permission validation failed")
 	}
 
-	fmt.Println("\n✅ Validation complete - you are ready to create applications")
+	progressln("\n✅ Validation complete - you are ready to create applications")
 	return nil
 }
 
