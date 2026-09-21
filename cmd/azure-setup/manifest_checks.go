@@ -224,6 +224,11 @@ func checkManifestValidDomains(manifest *teamsManifest) CheckResult {
 	for _, domain := range manifest.ValidDomains {
 		if strings.Contains(domain, "://") || strings.Contains(domain, "/") {
 			problems = append(problems, fmt.Sprintf("%q is a URL, not a bare domain", domain))
+			continue
+		}
+
+		if strings.Contains(domain, ":") {
+			problems = append(problems, fmt.Sprintf("%q carries a port; Teams expects a bare domain", domain))
 		}
 	}
 
@@ -269,8 +274,8 @@ func checkManifestContentURLs(manifest *teamsManifest) CheckResult {
 
 		result.Details = append(result.Details, tab.EntityID+": "+tab.ContentURL)
 
-		if !domainAllowed(manifest.ValidDomains, parsed.Host) {
-			failures = append(failures, fmt.Sprintf("%s: host %s is not in validDomains", tab.EntityID, parsed.Host))
+		if !domainAllowed(manifest.ValidDomains, parsed.Hostname()) {
+			failures = append(failures, fmt.Sprintf("%s: host %s is not in validDomains", tab.EntityID, parsed.Hostname()))
 		}
 
 		if !strings.Contains(parsed.Path, "/plugins/"+PluginID+"/") {
@@ -444,6 +449,12 @@ func domainAllowed(patterns []string, host string) bool {
 }
 
 func domainPatternMatches(pattern, host string) bool {
+	// The plugin derives validDomains from url.Host, which carries the port for
+	// a server not on 443, while a tab URL host may or may not. Comparing
+	// without the port makes the two agree either way.
+	pattern = stripPort(pattern)
+	host = stripPort(host)
+
 	if strings.EqualFold(pattern, host) {
 		return true
 	}
@@ -466,6 +477,15 @@ func domainPatternMatches(pattern, host string) bool {
 	}
 
 	return true
+}
+
+// stripPort removes a trailing :port from a host or domain pattern.
+func stripPort(host string) string {
+	if trimmed, _, found := strings.Cut(host, ":"); found {
+		return trimmed
+	}
+
+	return host
 }
 
 // manifestResourceHost returns the host the tab is served from, taken from the

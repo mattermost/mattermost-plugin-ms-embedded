@@ -228,9 +228,10 @@ Tests for the read-only `doctor` command. Every check is a pure function over a
 ### 8. `manifest_test.go` / `manifest_checks_test.go` / `catalog_test.go` - Manifest Validation
 
 Tests for `--manifest`. The happy-path fixture is
-`appstore/com.mattermost.ms.embedded-1.0.8/manifest.json`, a genuine published manifest
-committed to the repo, rather than an invented one — so the tests track the real shape
-and pin that `id` and `webApplicationInfo.id` are independent identifiers.
+`cmd/azure-setup/testdata/manifest.json`, a committed copy of a genuine published
+manifest rather than an invented one — so the tests track the real shape and pin that
+`id` and `webApplicationInfo.id` are independent identifiers. It is kept in `testdata`
+rather than read out of `appstore/`, where not every directory is tracked.
 
 **Test Cases:**
 - ✅ `TestLoadManifest*` - `.zip` package and bare `manifest.json`, format detected by content so a renamed download still works; missing file, malformed JSON, package with no manifest

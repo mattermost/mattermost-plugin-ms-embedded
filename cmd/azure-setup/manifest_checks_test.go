@@ -410,3 +410,36 @@ func TestManifestChecksRunWithoutARegistration(t *testing.T) {
 	assert.Contains(t, names, "Tab content URLs")
 	assert.NotContains(t, names, "Published to the tenant", "the catalog lookup needs a live client")
 }
+
+func TestDomainMatchingIgnoresPorts(t *testing.T) {
+	// The plugin builds validDomains from url.Host, which carries the port for
+	// a server not on 443, while a tab URL host may or may not. Either side
+	// having one must not break the comparison.
+	assert.True(t, domainAllowed([]string{"mm.example.com:8065"}, "mm.example.com"))
+	assert.True(t, domainAllowed([]string{"mm.example.com"}, "mm.example.com:8065"))
+	assert.True(t, domainAllowed([]string{"*.example.com:8065"}, "mm.example.com"))
+	assert.False(t, domainAllowed([]string{"other.example.com:8065"}, "mm.example.com"))
+}
+
+func TestCheckManifestContentURLsWithANonDefaultPort(t *testing.T) {
+	raw := rawRealManifest(t)
+	raw["validDomains"] = []any{"mm.example.com:8065"}
+	raw["webApplicationInfo"].(map[string]any)["resource"] = "api://mm.example.com:8065/" + realManifestClientID
+
+	tabs := raw["staticTabs"].([]any)
+	for _, tab := range tabs {
+		entry := tab.(map[string]any)
+		if _, ok := entry["contentUrl"].(string); ok {
+			entry["contentUrl"] = "https://mm.example.com:8065/plugins/" + PluginID + "/iframe/mattermostTab"
+		}
+	}
+
+	manifest := writeManifestFile(t, raw)
+
+	assert.Equal(t, StatusPass, checkManifestContentURLs(manifest).Status)
+
+	// The port is still surfaced, because Teams expects a bare domain.
+	domains := checkManifestValidDomains(manifest)
+	assert.Equal(t, StatusWarn, domains.Status)
+	assert.Contains(t, domains.Summary, "port")
+}

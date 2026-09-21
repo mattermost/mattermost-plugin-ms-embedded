@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"hash/crc32"
 	"maps"
 	"os"
@@ -220,4 +221,26 @@ func TestPNGDimensions(t *testing.T) {
 
 	_, _, ok = pngDimensions(nil)
 	assert.False(t, ok)
+}
+
+func TestLoadManifestRejectsAnOversizedPackage(t *testing.T) {
+	// Each entry was capped individually, which still let many entries add up
+	// without bound. The limit that matters is the total.
+	entries := map[string][]byte{ManifestName: []byte(`{"id":"x"}`)}
+
+	chunk := bytes.Repeat([]byte("A"), 1<<20)
+	for i := range 12 {
+		entries[fmt.Sprintf("filler-%d.bin", i)] = chunk
+	}
+
+	_, err := loadManifest(buildPackage(t, entries))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "beyond the")
+}
+
+func TestLoadManifestAcceptsANormalPackage(t *testing.T) {
+	// The cumulative limit must not reject a realistic package.
+	manifest, err := loadManifest(realPackage(t, nil, defaultIcons()))
+	require.NoError(t, err)
+	assert.True(t, manifest.FromPackage)
 }

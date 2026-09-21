@@ -118,16 +118,21 @@ func loadManifestPackage(path string, data []byte) (*teamsManifest, error) {
 
 	files := make(map[string][]byte, len(reader.File))
 
+	// Capping each entry individually still lets a package with many entries
+	// expand without bound, so the running total is what is actually enforced.
+	var total int
+
 	for _, entry := range reader.File {
 		if entry.FileInfo().IsDir() {
 			continue
 		}
 
-		contents, readErr := readZipEntry(entry)
+		contents, readErr := readZipEntry(entry, maxManifestPackageBytes-total)
 		if readErr != nil {
 			return nil, errors.Wrapf(readErr, "failed to read %s from %s", entry.Name, path)
 		}
 
+		total += len(contents)
 		files[entry.Name] = contents
 	}
 
@@ -149,8 +154,12 @@ func loadManifestPackage(path string, data []byte) (*teamsManifest, error) {
 }
 
 // readZipEntry decompresses one package entry, refusing anything that inflates
-// past the package size limit.
-func readZipEntry(entry *zip.File) ([]byte, error) {
+// past the remaining budget for the package as a whole.
+func readZipEntry(entry *zip.File, remaining int) ([]byte, error) {
+	if remaining < 0 {
+		remaining = 0
+	}
+
 	rc, err := entry.Open()
 	if err != nil {
 		return nil, err
@@ -159,13 +168,13 @@ func readZipEntry(entry *zip.File) ([]byte, error) {
 
 	// Bound the read rather than trusting the declared uncompressed size, so a
 	// package that inflates far beyond its download size cannot exhaust memory.
-	contents, err := io.ReadAll(io.LimitReader(rc, maxManifestPackageBytes+1))
+	contents, err := io.ReadAll(io.LimitReader(rc, int64(remaining)+1))
 	if err != nil {
 		return nil, err
 	}
 
-	if len(contents) > maxManifestPackageBytes {
-		return nil, errors.Errorf("entry %s expands beyond the %d byte limit", entry.Name, maxManifestPackageBytes)
+	if len(contents) > remaining {
+		return nil, errors.Errorf("entry %s expands the package beyond the %d byte limit", entry.Name, maxManifestPackageBytes)
 	}
 
 	return contents, nil
