@@ -230,6 +230,38 @@ Re-running `create` **without** the flag does not remove the permissions: the
 tool carries over any permission already on the application that it does not
 manage, so rotating the plugin secret will not break the doctor.
 
+### Cross-checking the Teams app manifest
+
+The registration is only one side of the contract. Teams requests an SSO token for the
+audience named in the manifest's `webApplicationInfo.resource`, so a registration that is
+perfect on its own still fails if the manifest disagrees with it. Pass `--manifest` to
+check both sides together:
+
+```bash
+azure-setup doctor \
+  --client-id "abc123-def456-..." \
+  --manifest com.mattermost.ms.embedded-1.0.8.zip
+```
+
+Either the `.zip` app package downloaded from the plugin's settings page or a bare
+`manifest.json` works; the format is detected from the file contents, not the extension,
+so a renamed download is fine.
+
+`--manifest` supplies the site URL when `--site-url` is omitted, but never the client ID.
+Reading both sides of the client ID comparison out of the same file would make it
+vacuous — a manifest pointing at the wrong registration would go unnoticed. The report
+header marks a site URL that was inferred.
+
+This also runs the lookup the plugin itself performs before sending a notification
+(`externalId eq '<manifest id>'` against the Teams app catalog, falling back to the
+catalog ID because Graph leaves `externalId` empty for store-distributed apps), so it
+catches an app that was never uploaded or is a version behind. That needs
+`AppCatalog.Read.All`; without it the check reports SKIP rather than failing.
+
+**What it cannot check:** Graph does not expose `webApplicationInfo` on a published app,
+so the catalog half confirms presence, version and publishing state only. The contents
+are verified against the file you pass in.
+
 ### `azure-setup doctor`
 
 Audit an existing Azure AD application and report whether every setting the plugin
@@ -246,6 +278,7 @@ depends on is configured correctly. The doctor is read-only: it never changes Az
 | Admin consent | A service principal exists and is enabled, and each application permission has been consented tenant-wide. Delegated permissions are reported but only warn: the plugin authenticates app-only, so an unconsented delegated permission does not block it |
 | Credentials | At least one client secret is valid, with a warning before it expires; expired secrets and certificates are reported |
 | Housekeeping | The application has owners, and no other registration shares its display name |
+| Teams app manifest | With `--manifest`: the SSO audience, client ID, valid domains, tab URLs, notification permission, package icons, and whether the app is published in the tenant's Teams catalog |
 
 **Flags:**
 
@@ -253,7 +286,8 @@ depends on is configured correctly. The doctor is read-only: it never changes Az
 |------|------|----------|---------|-------------|
 | `--client-id` | string | No | - | Client ID of the application to inspect (preferred over `--app-name`) |
 | `--app-name` | string | No | "Mattermost for Teams" | Display name to look up when `--client-id` is not given |
-| `--site-url` | string | No | - | Mattermost site URL, used to verify the Application ID URI |
+| `--site-url` | string | No | - | Mattermost site URL, used to verify the Application ID URI. Derived from `--manifest` when omitted |
+| `--manifest` | string | No | - | Teams app package (`.zip`) or `manifest.json` to cross-check against the registration |
 | `--tenant-id` | string | No | - | Azure AD Tenant ID (auto-detected if omitted) |
 | `--output` / `-o` | string | No | "human" | Report format: human, json, markdown |
 | `--report-file` | string | No | - | Also write the report to this file |

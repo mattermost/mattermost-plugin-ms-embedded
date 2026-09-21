@@ -103,11 +103,16 @@ the consent grants in the tenant, and checks:
   7. At least one client secret is valid, with a warning before it expires
   8. Housekeeping: application owners and duplicate registrations sharing the name
 
+Pass --manifest to additionally cross-check a Teams app manifest against the
+registration: the SSO audience, client ID, valid domains and tab URLs, and
+whether the app is actually published in the tenant's Teams catalog.
+
 The command exits non-zero when any check fails.
 
 Example:
   azure-setup doctor --client-id abc123... --site-url https://mattermost.example.com
-  azure-setup doctor --app-name "Mattermost for Teams" -o markdown --report-file report.md`,
+  azure-setup doctor --app-name "Mattermost for Teams" -o markdown --report-file report.md
+  azure-setup doctor --client-id abc123... --manifest com.mattermost.ms.embedded-1.0.8.zip`,
 	RunE: runDoctor,
 }
 
@@ -125,6 +130,7 @@ var (
 	flagYes               bool
 	flagCloud             string
 	flagDoctorReqs        bool
+	flagManifest          string
 	flagReportFile        string
 	flagSecretWarningDays int
 )
@@ -158,6 +164,7 @@ func init() {
 	doctorCmd.Flags().StringVar(&flagSiteURL, "site-url", "", "Mattermost site URL, used to verify the Application ID URI")
 	doctorCmd.Flags().BoolVarP(&flagVerbose, "verbose", "v", false, "Enable verbose output")
 	doctorCmd.Flags().StringVarP(&flagOutputFormat, "output", "o", "human", "Report format (human, json, markdown)")
+	doctorCmd.Flags().StringVar(&flagManifest, "manifest", "", "Teams app package (.zip) or manifest.json to cross-check against the registration")
 	doctorCmd.Flags().StringVar(&flagReportFile, "report-file", "", "Also write the report to this file")
 	doctorCmd.Flags().IntVar(&flagSecretWarningDays, "secret-warning-days", DefaultSecretWarningDays, "Warn when a client secret expires within this many days")
 	doctorCmd.Flags().StringVar(&flagCloud, "cloud", cloudenv.Commercial, "Microsoft national cloud (commercial, gcchigh, dod)")

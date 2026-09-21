@@ -72,6 +72,18 @@ type doctorInputs struct {
 	// display name of the application under inspection.
 	DuplicateClientIDs []string
 	DuplicatesErr      error
+
+	// Manifest is the Teams app manifest to cross-check against the
+	// registration, set only when --manifest was given. ManifestErr records why
+	// it could not be read.
+	Manifest    *teamsManifest
+	ManifestErr error
+
+	// CatalogApp is the app published to the tenant's Teams catalog that
+	// corresponds to the manifest, or nil when none matched.
+	CatalogApp    *catalogApp
+	CatalogErr    error
+	CatalogLookup bool
 }
 
 // runDoctorChecks evaluates every configuration rule against the data gathered
@@ -83,7 +95,7 @@ func runDoctorChecks(in doctorInputs) []CheckResult {
 		in.SecretWarningDays = DefaultSecretWarningDays
 	}
 
-	return []CheckResult{
+	checks := []CheckResult{
 		checkSignInAudience(in.App),
 		checkApplicationIDURI(in.App, in.SiteURL),
 		checkExposedScope(in.App),
@@ -97,6 +109,62 @@ func runDoctorChecks(in doctorInputs) []CheckResult {
 		checkOwners(in.Owners, in.OwnersErr),
 		checkDuplicateApplications(in.App, in.DuplicateClientIDs, in.DuplicatesErr),
 	}
+
+	return append(checks, manifestChecks(in)...)
+}
+
+// manifestChecks cross-checks the Teams app manifest against the registration.
+// It returns nothing at all when --manifest was not given: the manifest is
+// optional, and emitting skips for it would downgrade every run that does not
+// use it.
+func manifestChecks(in doctorInputs) []CheckResult {
+	if in.Manifest == nil && in.ManifestErr == nil {
+		return nil
+	}
+
+	if in.ManifestErr != nil {
+		return []CheckResult{{
+			Category:    CategoryManifest,
+			Name:        "Manifest readable",
+			Status:      StatusFail,
+			Summary:     in.ManifestErr.Error(),
+			Remediation: "Pass the app package downloaded from the plugin settings page, or the manifest.json inside it",
+		}}
+	}
+
+	var checks []CheckResult
+
+	// The two cross-checks need the registration. When it could not be read the
+	// rest of the manifest is still worth reporting on, so they are omitted
+	// rather than the whole category being dropped.
+	if in.App != nil {
+		checks = append(checks,
+			checkManifestAudience(in.Manifest, in.App),
+			checkManifestClientID(in.Manifest, in.App),
+		)
+	}
+
+	checks = append(checks,
+		checkManifestAppID(in.Manifest),
+		checkManifestValidDomains(in.Manifest),
+		checkManifestContentURLs(in.Manifest),
+		checkManifestNotificationPermission(in.Manifest),
+		checkManifestVersion(in.Manifest),
+	)
+
+	if depth := manifestPathDepthNote(in.Manifest.WebApplicationInfo.Resource); depth != nil {
+		checks = append(checks, *depth)
+	}
+
+	if in.Manifest.FromPackage {
+		checks = append(checks, checkManifestPackage(in.Manifest))
+	}
+
+	if in.CatalogLookup {
+		checks = append(checks, checkCatalogPublication(in.Manifest, in.CatalogApp, in.CatalogErr))
+	}
+
+	return checks
 }
 
 // checkSignInAudience verifies the application is registered as single tenant,

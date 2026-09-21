@@ -225,6 +225,29 @@ Tests for the read-only `doctor` command. Every check is a pure function over a
 - ✅ No Azure credentials required
 - ✅ Each rule is asserted independently, so a regression names the broken check
 
+### 8. `manifest_test.go` / `manifest_checks_test.go` / `catalog_test.go` - Manifest Validation
+
+Tests for `--manifest`. The happy-path fixture is
+`appstore/com.mattermost.ms.embedded-1.0.8/manifest.json`, a genuine published manifest
+committed to the repo, rather than an invented one — so the tests track the real shape
+and pin that `id` and `webApplicationInfo.id` are independent identifiers.
+
+**Test Cases:**
+- ✅ `TestLoadManifest*` - `.zip` package and bare `manifest.json`, format detected by content so a renamed download still works; missing file, malformed JSON, package with no manifest
+- ✅ `TestCheckManifestAudience` - matching, wrong host, and a case-only difference that warns rather than fails
+- ✅ `TestManifestSubpathDoubleSlashIsCaught` - the doubled separator a subpath install emits must not match the registration's URI
+- ✅ `TestManifestPathDepthNote` - a multi-segment identifier URI warns; Microsoft documents only `api://<domain>/<client-id>`
+- ✅ `TestCheckManifestClientID` / `TestCheckManifestAppID` - GUID validation, wrong registration, and that reusing one GUID for both is allowed
+- ✅ `TestCheckManifestValidDomains` - serving host missing, URLs instead of bare domains, entry count over the schema limit
+- ✅ `TestCheckManifestContentURLs` - host outside `validDomains`, wrong plugin path, plain HTTP warning; the `about` tab has no `contentUrl` and must not be counted
+- ✅ `TestCheckManifestPackage` - declared icon absent, wrong dimensions, and that icon filenames come from the manifest rather than a hardcoded convention
+- ✅ `TestCheckCatalogPublication` - published, never uploaded, stale version, unpublished state, unreadable catalog, and store distribution with an empty `externalId`
+- ✅ `TestManifestChecksAreAbsentWithoutAManifest` - no skips are emitted when `--manifest` is not used, so the verdict is not downgraded
+
+**Benefits:**
+- ✅ No Azure credentials and no tenant required
+- ✅ Each check was confirmed to fail when its rule is removed, not merely to pass
+
 ## Running Tests
 
 ### Run All Unit Tests

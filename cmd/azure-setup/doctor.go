@@ -65,6 +65,12 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	if flagManifest != "" {
+		if _, err = os.Stat(flagManifest); err != nil {
+			return errors.Wrap(err, "invalid --manifest")
+		}
+	}
+
 	if flagSecretWarningDays < 0 {
 		return errors.Errorf("invalid --secret-warning-days %d: must be zero or greater (zero suppresses expiry warnings)", flagSecretWarningDays)
 	}
@@ -80,12 +86,18 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	progressln("🩺 Running Azure configuration doctor...")
 
+	// Loaded before authenticating so a malformed package fails fast, and
+	// because it can supply the site URL the Application ID URI is checked
+	// against. It deliberately never supplies the client ID: both sides of that
+	// comparison coming from the same file would make the check vacuous.
+	manifest, manifestErr := loadDoctorManifest(report)
+
 	client, err := connectDoctor(ctx, env, report)
 	if err != nil {
 		return err
 	}
 
-	if err = inspectApplication(ctx, client, env, report); err != nil {
+	if err = inspectApplication(ctx, client, env, report, manifest, manifestErr); err != nil {
 		return err
 	}
 
@@ -222,7 +234,7 @@ func checkDirectoryRoles(directory directoryContext) CheckResult {
 
 // inspectApplication locates the application under inspection, gathers the
 // related Graph objects, and appends every configuration check to the report.
-func inspectApplication(ctx context.Context, client *msgraphsdk.GraphServiceClient, env cloudenv.Environment, report *DoctorReport) error {
+func inspectApplication(ctx context.Context, client *msgraphsdk.GraphServiceClient, env cloudenv.Environment, report *DoctorReport, manifest *teamsManifest, manifestErr error) error {
 	app, matches, err := findApplicationForDoctor(ctx, client, flagAppName, flagClientID)
 	if err != nil {
 		// Reading the application is the one lookup every later check depends
@@ -238,6 +250,7 @@ func inspectApplication(ctx context.Context, client *msgraphsdk.GraphServiceClie
 			Summary:     "Could not search for the application: " + err.Error(),
 			Remediation: "Grant the credential Application.Read.All, or see \"Permissions for the doctor\" in the README",
 		})
+		addManifestOnlyChecks(report, manifest, manifestErr)
 
 		return nil
 	}
@@ -250,6 +263,7 @@ func inspectApplication(ctx context.Context, client *msgraphsdk.GraphServiceClie
 			Summary:     describeMissingApplication(flagAppName, flagClientID),
 			Remediation: "Run `azure-setup create --site-url <mattermost-url>` to create the application",
 		})
+		addManifestOnlyChecks(report, manifest, manifestErr)
 
 		return nil
 	}
@@ -265,10 +279,12 @@ func inspectApplication(ctx context.Context, client *msgraphsdk.GraphServiceClie
 
 	inputs := doctorInputs{
 		App:               app,
-		SiteURL:           flagSiteURL,
+		SiteURL:           report.MattermostSiteURL,
 		PortalHost:        env.PortalHost,
 		Now:               time.Now(),
 		SecretWarningDays: flagSecretWarningDays,
+		Manifest:          manifest,
+		ManifestErr:       manifestErr,
 	}
 
 	// The Microsoft Graph service principal is read once: it is the resource
@@ -281,6 +297,16 @@ func inspectApplication(ctx context.Context, client *msgraphsdk.GraphServiceClie
 	inputs.Consent = readConsentState(ctx, client, inputs.ServicePrincipal, inputs.ServicePrincipalErr, graphSP, graphSPErr)
 	inputs.Owners, inputs.OwnersErr = listApplicationOwners(ctx, client, report.ApplicationObjectID)
 	inputs.DuplicateClientIDs, inputs.DuplicatesErr = findDuplicateApplications(ctx, client, report.ApplicationName, report.ApplicationClientID)
+
+	// The catalog lookup needs the manifest's id, so it only runs when a
+	// manifest was supplied and parsed.
+	// An empty id would issue `externalId eq ''`, which can match an unrelated
+	// store-distributed app and report it as this one. The Teams app ID check
+	// already fails for that case.
+	if manifest != nil && manifest.ID != "" {
+		inputs.CatalogLookup = true
+		inputs.CatalogApp, inputs.CatalogErr = findCatalogApp(ctx, client, manifest.ID)
+	}
 
 	for _, check := range runDoctorChecks(inputs) {
 		report.Add(check)
@@ -309,6 +335,49 @@ func checkApplicationLookup(report *DoctorReport, matches int) CheckResult {
 	result.Summary = fmt.Sprintf("Found %q (client ID %s)", report.ApplicationName, report.ApplicationClientID)
 
 	return result
+}
+
+// loadDoctorManifest reads the manifest named by --manifest and records it on
+// the report. When --site-url was not given, the host the manifest itself
+// claims is used instead, so a package alone is enough to verify the
+// Application ID URI.
+func loadDoctorManifest(report *DoctorReport) (*teamsManifest, error) {
+	if flagManifest == "" {
+		return nil, nil
+	}
+
+	manifest, err := loadManifest(flagManifest)
+	if err != nil {
+		return nil, err
+	}
+
+	report.ManifestPath = manifest.SourcePath
+
+	// The site URL is deliberately NOT taken from the manifest. Building the
+	// expected Application ID URI out of the manifest and then comparing it to
+	// the registration would be circular: checkApplicationIDURI would pass even
+	// when both sides name the wrong server. The manifest is cross-checked
+	// against the registration directly instead, which is a real comparison
+	// between two independent sources.
+	if flagSiteURL == "" {
+		report.ManifestHost = manifestResourceHost(manifest)
+	}
+
+	return manifest, nil
+}
+
+// addManifestOnlyChecks runs the manifest checks that need no registration
+// data, for the paths where the application could not be read. Most of the
+// manifest is self-consistent and worth reporting on regardless - including
+// the manifest being unreadable at all.
+func addManifestOnlyChecks(report *DoctorReport, manifest *teamsManifest, manifestErr error) {
+	if manifest == nil && manifestErr == nil {
+		return
+	}
+
+	for _, check := range manifestChecks(doctorInputs{Manifest: manifest, ManifestErr: manifestErr}) {
+		report.Add(check)
+	}
 }
 
 // describeMissingApplication explains which lookup came up empty.

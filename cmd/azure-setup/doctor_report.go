@@ -66,6 +66,7 @@ const (
 	CategoryPermissions  = "API permissions"
 	CategoryConsent      = "Admin consent"
 	CategoryCredentials  = "Credentials"
+	CategoryManifest     = "Teams app manifest"
 	CategoryHousekeeping = "Housekeeping"
 )
 
@@ -93,7 +94,15 @@ type DoctorReport struct {
 	ApplicationObjectID string `json:"application_object_id,omitempty"`
 	ApplicationIDURI    string `json:"application_id_uri,omitempty"`
 	MattermostSiteURL   string `json:"mattermost_site_url,omitempty"`
-	PortalHost          string `json:"portal_host,omitempty"`
+
+	// ManifestHost is the host the manifest claims to serve the tab from, shown
+	// when no --site-url was given. It is context only: it is never used to
+	// derive the expected Application ID URI, which would be circular.
+	ManifestHost string `json:"manifest_host,omitempty"`
+
+	// ManifestPath is the app package or manifest.json that was cross-checked.
+	ManifestPath string `json:"manifest_path,omitempty"`
+	PortalHost   string `json:"portal_host,omitempty"`
 
 	Checks  []CheckResult `json:"checks"`
 	Summary ReportSummary `json:"summary"`
@@ -356,6 +365,8 @@ func reportHeaderFields(report *DoctorReport) [][2]string {
 		{"Object ID", report.ApplicationObjectID},
 		{"Application ID URI", report.ApplicationIDURI},
 		{"Mattermost site URL", report.MattermostSiteURL},
+		{"Manifest", report.ManifestPath},
+		{"Manifest host", report.ManifestHost},
 	}
 
 	var fields [][2]string
