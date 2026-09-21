@@ -6,14 +6,25 @@ package main
 import (
 	"bufio"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"github.com/pkg/errors"
 )
 
+// preflightPermissionNote explains a permission the plugin does not itself
+// need, so the operator approving it knows what it is for and what it costs.
+func preflightPermissionNote(perm requiredPermission) string {
+	if !slices.Contains(doctorRequirementNames, perm.Name) {
+		return ""
+	}
+
+	return " - for azure-setup doctor; grants this application's credentials tenant-wide directory read"
+}
+
 // showPreflightConfirmation displays a summary of planned changes and prompts for confirmation
-func showPreflightConfirmation(config *SetupConfig, existingApp models.Applicationable) error {
+func showPreflightConfirmation(config *SetupConfig, existingApp models.Applicationable, permissions []requiredPermission) error {
 	progressln("\n" + strings.Repeat("=", 70))
 	progressln("🔍 PRE-FLIGHT CHECK")
 	progressln(strings.Repeat("=", 70))
@@ -32,12 +43,8 @@ func showPreflightConfirmation(config *SetupConfig, existingApp models.Applicati
 	progressf("   Secret Expiration:      %d months\n", config.SecretExpiration)
 
 	progressln("\n🔐 API Permissions to configure:")
-	for _, perm := range getRequiredPermissions() {
-		permType := "Delegated"
-		if perm.Type == PermissionTypeRole {
-			permType = "Application"
-		}
-		progressf("   • %s (%s)\n", perm.Name, permType)
+	for _, perm := range permissions {
+		progressf("   • %s (%s)%s\n", perm.Name, permissionKindLabel(perm.Type), preflightPermissionNote(perm))
 	}
 
 	progressln("\n🌐 API Exposure:")

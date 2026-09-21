@@ -32,7 +32,7 @@ func TestConfigureAPIPermissions_DryRun(t *testing.T) {
 	objectID := "obj-123"
 	app.SetId(&objectID)
 
-	err := configureAPIPermissions(ctx, nil, config, app)
+	err := configureAPIPermissions(ctx, nil, config, app, getRequiredPermissions())
 	require.NoError(t, err, "Dry run should not return error")
 	assert.Empty(t, config.rollback, "Dry run should not add rollback functions")
 }
@@ -167,7 +167,7 @@ func TestConfigureAPIPermissions_VerboseOutput(t *testing.T) {
 	objectID := "obj-123"
 	app.SetId(&objectID)
 
-	err := configureAPIPermissions(ctx, nil, config, app)
+	err := configureAPIPermissions(ctx, nil, config, app, getRequiredPermissions())
 	require.NoError(t, err, "Verbose mode should not affect success")
 }
 

@@ -232,15 +232,23 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "failed to check for existing application")
 	}
 
+	// Resolve the permission set once, before the operator is asked to approve
+	// it, so the confirmation cannot list something different from what gets
+	// requested.
+	permissions, err := resolvePermissions(ctx, client, config)
+	if err != nil {
+		return err
+	}
+
 	// Show pre-flight confirmation unless skipped
 	if !config.DryRun && !config.SkipConfirmation && !config.NonInteractive {
-		if err = showPreflightConfirmation(config, existingApp); err != nil {
+		if err = showPreflightConfirmation(config, existingApp, permissions); err != nil {
 			return err
 		}
 	}
 
 	// Execute setup with rollback on error
-	result, err := executeSetup(ctx, client, config, existingApp)
+	result, err := executeSetup(ctx, client, config, existingApp, permissions)
 	if err != nil {
 		if !config.DryRun {
 			executeRollback(config)
@@ -294,7 +302,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 }
 
 // executeSetup orchestrates the entire setup process
-func executeSetup(ctx context.Context, client *msgraphsdk.GraphServiceClient, config *SetupConfig, existingApp models.Applicationable) (*SetupResult, error) {
+func executeSetup(ctx context.Context, client *msgraphsdk.GraphServiceClient, config *SetupConfig, existingApp models.Applicationable, permissions []requiredPermission) (*SetupResult, error) {
 	var app models.Applicationable
 	var created bool
 	var err error
@@ -306,7 +314,7 @@ func executeSetup(ctx context.Context, client *msgraphsdk.GraphServiceClient, co
 	}
 
 	// Configure API permissions
-	if err = configureAPIPermissions(ctx, client, config, app); err != nil {
+	if err = configureAPIPermissions(ctx, client, config, app, permissions); err != nil {
 		return nil, errors.Wrap(err, "failed to configure API permissions")
 	}
 

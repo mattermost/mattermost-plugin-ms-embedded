@@ -16,20 +16,36 @@ import (
 	"github.com/pkg/errors"
 )
 
-// configureAPIPermissions adds the required API permissions to the application
-func configureAPIPermissions(ctx context.Context, client *msgraphsdk.GraphServiceClient, config *SetupConfig, app models.Applicationable) error {
-	if config.Verbose {
-		progressln("🔑 Configuring API permissions...")
-	}
-
+// resolvePermissions returns every Graph permission this run will request: the
+// ones the plugin needs, plus the read-only ones the doctor needs when
+// --create-doctor-requirements was given.
+//
+// It is called before the pre-flight confirmation rather than inside
+// configureAPIPermissions so that the list the operator approves is the same
+// list that gets requested. The doctor permissions are the two the README
+// warns about - they grant the plugin's own client secret tenant-wide
+// directory read - so they are the last thing a consent prompt should omit.
+func resolvePermissions(ctx context.Context, client *msgraphsdk.GraphServiceClient, config *SetupConfig) ([]requiredPermission, error) {
 	permissions := getRequiredPermissions()
 
-	if config.CreateDoctorRequirements {
-		doctorPermissions, err := resolveGraphAppRoles(ctx, client, doctorRequirementNames)
-		if err != nil {
-			return errors.Wrap(err, "failed to resolve the permissions required by the doctor command")
-		}
-		permissions = append(permissions, doctorPermissions...)
+	if !config.CreateDoctorRequirements {
+		return permissions, nil
+	}
+
+	doctorPermissions, err := resolveGraphAppRoles(ctx, client, doctorRequirementNames)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to resolve the permissions required by the doctor command")
+	}
+
+	return append(permissions, doctorPermissions...), nil
+}
+
+// configureAPIPermissions requests the given permissions on the application,
+// preserving any it does not manage, and ensures the service principal exists
+// so that admin consent can be granted.
+func configureAPIPermissions(ctx context.Context, client *msgraphsdk.GraphServiceClient, config *SetupConfig, app models.Applicationable, permissions []requiredPermission) error {
+	if config.Verbose {
+		progressln("🔑 Configuring API permissions...")
 	}
 
 	if config.DryRun {
