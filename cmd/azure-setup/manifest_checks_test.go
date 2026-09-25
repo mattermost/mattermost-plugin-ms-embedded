@@ -241,6 +241,23 @@ func TestCheckManifestContentURLs(t *testing.T) {
 		assert.Equal(t, StatusWarn, result.Status)
 		assert.Contains(t, result.Summary, "not https")
 	})
+
+	for _, test := range []struct {
+		name       string
+		contentURL string
+	}{
+		{name: "relative URL", contentURL: "/plugins/" + PluginID + "/iframe/mattermostTab"},
+		{name: "unsupported scheme", contentURL: "ftp://" + realManifestHost + "/plugins/" + PluginID + "/iframe/mattermostTab"},
+	} {
+		t.Run("rejects "+test.name, func(t *testing.T) {
+			raw := rawRealManifest(t)
+			raw["staticTabs"].([]any)[0].(map[string]any)["contentUrl"] = test.contentURL
+
+			result := checkManifestContentURLs(writeManifestFile(t, raw))
+			assert.Equal(t, StatusFail, result.Status)
+			assert.Contains(t, result.Summary, "must use an absolute http or https URL")
+		})
+	}
 }
 
 func TestCheckManifestNotificationPermission(t *testing.T) {

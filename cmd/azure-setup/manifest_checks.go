@@ -274,6 +274,11 @@ func checkManifestContentURLs(manifest *teamsManifest) CheckResult {
 
 		result.Details = append(result.Details, tab.EntityID+": "+tab.ContentURL)
 
+		if !parsed.IsAbs() || (!strings.EqualFold(parsed.Scheme, "http") && !strings.EqualFold(parsed.Scheme, "https")) {
+			failures = append(failures, fmt.Sprintf("%s: must use an absolute http or https URL", tab.EntityID))
+			continue
+		}
+
 		if !domainAllowed(manifest.ValidDomains, parsed.Hostname()) {
 			failures = append(failures, fmt.Sprintf("%s: host %s is not in validDomains", tab.EntityID, parsed.Hostname()))
 		}
