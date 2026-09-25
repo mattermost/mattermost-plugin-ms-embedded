@@ -5,11 +5,12 @@ package main
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
+	"github.com/microsoftgraph/msgraph-sdk-go-core/authentication"
 	"github.com/pkg/errors"
 
 	"github.com/mattermost/mattermost-plugin-ms-embedded/server/cloudenv"
@@ -19,7 +20,7 @@ import (
 // Priority order: Environment variables -> Azure CLI -> Interactive browser
 func authenticateToAzure(ctx context.Context, env cloudenv.Environment, tenantID string, verbose bool) (azcore.TokenCredential, error) {
 	if verbose {
-		fmt.Println("🔐 Authenticating to Azure...")
+		progressln("🔐 Authenticating to Azure...")
 	}
 
 	// Try multiple authentication methods in order of preference
@@ -29,7 +30,7 @@ func authenticateToAzure(ctx context.Context, env cloudenv.Environment, tenantID
 	}
 
 	if verbose {
-		fmt.Printf("✅ Successfully authenticated using: %s\n", method)
+		progressf("✅ Successfully authenticated using: %s\n", method)
 	}
 
 	return credential, nil
@@ -39,7 +40,7 @@ func authenticateToAzure(ctx context.Context, env cloudenv.Environment, tenantID
 func tryAuthenticationMethods(ctx context.Context, env cloudenv.Environment, tenantID string, verbose bool) (azcore.TokenCredential, string, error) {
 	// Method 1: Try environment variables (service principal)
 	if verbose {
-		fmt.Println("   Trying: Environment variables (Service Principal)...")
+		progressln("   Trying: Environment variables (Service Principal)...")
 	}
 	if cred, err := tryEnvironmentCredential(env); err == nil {
 		if err := testCredential(ctx, env, cred); err == nil {
@@ -49,7 +50,7 @@ func tryAuthenticationMethods(ctx context.Context, env cloudenv.Environment, ten
 
 	// Method 2: Try Azure CLI
 	if verbose {
-		fmt.Println("   Trying: Azure CLI...")
+		progressln("   Trying: Azure CLI...")
 	}
 	if cred, err := tryAzureCLICredential(tenantID); err == nil {
 		if err := testCredential(ctx, env, cred); err == nil {
@@ -59,7 +60,7 @@ func tryAuthenticationMethods(ctx context.Context, env cloudenv.Environment, ten
 
 	// Method 3: Try interactive browser
 	if verbose {
-		fmt.Println("   Trying: Interactive browser...")
+		progressln("   Trying: Interactive browser...")
 	}
 	if cred, err := tryInteractiveBrowserCredential(env, tenantID); err == nil {
 		if err := testCredential(ctx, env, cred); err == nil {
@@ -69,7 +70,7 @@ func tryAuthenticationMethods(ctx context.Context, env cloudenv.Environment, ten
 
 	// Method 4: Device code flow (last resort, works on headless systems)
 	if verbose {
-		fmt.Println("   Trying: Device code flow...")
+		progressln("   Trying: Device code flow...")
 	}
 	if cred, err := tryDeviceCodeCredential(env, tenantID); err == nil {
 		if err := testCredential(ctx, env, cred); err == nil {
@@ -134,7 +135,9 @@ func tryInteractiveBrowserCredential(env cloudenv.Environment, tenantID string) 
 func tryDeviceCodeCredential(env cloudenv.Environment, tenantID string) (azcore.TokenCredential, error) {
 	opts := &azidentity.DeviceCodeCredentialOptions{
 		UserPrompt: func(ctx context.Context, message azidentity.DeviceCodeMessage) error {
-			fmt.Println("\n" + message.Message)
+			// stderr, so the prompt reaches the operator without corrupting a
+			// report being piped from stdout (doctor -o json).
+			progressln("\n" + message.Message)
 			return nil
 		},
 	}
@@ -163,7 +166,7 @@ func testCredential(ctx context.Context, env cloudenv.Environment, cred azcore.T
 // validateAzureConnection ensures we can connect to Azure and get basic info
 func validateAzureConnection(ctx context.Context, env cloudenv.Environment, cred azcore.TokenCredential, verbose bool) error {
 	if verbose {
-		fmt.Println("🔍 Validating Azure connection...")
+		progressln("🔍 Validating Azure connection...")
 	}
 
 	// Try to get a token to verify the connection works
@@ -179,8 +182,27 @@ func validateAzureConnection(ctx context.Context, env cloudenv.Environment, cred
 	}
 
 	if verbose {
-		fmt.Println("✅ Azure connection validated")
+		progressln("✅ Azure connection validated")
 	}
 
 	return nil
+}
+
+// newGraphClient builds a Microsoft Graph client bound to the given national
+// cloud. The cloud's Graph scope is requested so the token audience matches the
+// cloud's Graph endpoint (for example graph.microsoft.us), and the adapter base
+// URL is set explicitly because DoD uses a different Graph host than GCC High.
+func newGraphClient(env cloudenv.Environment, cred azcore.TokenCredential) (*msgraphsdk.GraphServiceClient, error) {
+	authProvider, err := authentication.NewAzureIdentityAuthenticationProviderWithScopes(cred, []string{env.GraphScope})
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create auth provider")
+	}
+
+	adapter, err := msgraphsdk.NewGraphRequestAdapter(authProvider)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to create Graph adapter")
+	}
+	adapter.SetBaseUrl(env.GraphBaseURL)
+
+	return msgraphsdk.NewGraphServiceClient(adapter), nil
 }

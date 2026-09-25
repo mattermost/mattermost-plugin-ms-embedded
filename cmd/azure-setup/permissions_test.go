@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/google/uuid"
@@ -31,7 +32,7 @@ func TestConfigureAPIPermissions_DryRun(t *testing.T) {
 	objectID := "obj-123"
 	app.SetId(&objectID)
 
-	err := configureAPIPermissions(ctx, nil, config, app)
+	err := configureAPIPermissions(ctx, nil, config, app, getRequiredPermissions())
 	require.NoError(t, err, "Dry run should not return error")
 	assert.Empty(t, config.rollback, "Dry run should not add rollback functions")
 }
@@ -39,13 +40,13 @@ func TestConfigureAPIPermissions_DryRun(t *testing.T) {
 // TestBuildRequiredResourceAccess tests building permission structure
 func TestBuildRequiredResourceAccess(t *testing.T) {
 	t.Run("creates_resource_access_list", func(t *testing.T) {
-		resourceAccess, err := buildRequiredResourceAccess()
+		resourceAccess, err := buildRequiredResourceAccess(getRequiredPermissions())
 		require.NoError(t, err)
 		assert.NotEmpty(t, resourceAccess)
 	})
 
 	t.Run("includes_microsoft_graph", func(t *testing.T) {
-		resourceAccess, err := buildRequiredResourceAccess()
+		resourceAccess, err := buildRequiredResourceAccess(getRequiredPermissions())
 		require.NoError(t, err)
 
 		foundGraph := false
@@ -79,7 +80,7 @@ func TestBuildRequiredResourceAccess(t *testing.T) {
 	})
 
 	t.Run("permission_ids_are_valid_uuids", func(t *testing.T) {
-		resourceAccess, err := buildRequiredResourceAccess()
+		resourceAccess, err := buildRequiredResourceAccess(getRequiredPermissions())
 		require.NoError(t, err)
 
 		for _, resource := range resourceAccess {
@@ -99,7 +100,7 @@ func TestBuildRequiredResourceAccess(t *testing.T) {
 	})
 
 	t.Run("has_all_required_permissions", func(t *testing.T) {
-		_, err := buildRequiredResourceAccess()
+		_, err := buildRequiredResourceAccess(getRequiredPermissions())
 		require.NoError(t, err)
 
 		requiredPerms := getRequiredPermissions()
@@ -166,7 +167,7 @@ func TestConfigureAPIPermissions_VerboseOutput(t *testing.T) {
 	objectID := "obj-123"
 	app.SetId(&objectID)
 
-	err := configureAPIPermissions(ctx, nil, config, app)
+	err := configureAPIPermissions(ctx, nil, config, app, getRequiredPermissions())
 	require.NoError(t, err, "Verbose mode should not affect success")
 }
 
@@ -174,7 +175,7 @@ func TestConfigureAPIPermissions_VerboseOutput(t *testing.T) {
 func TestConfigureAPIPermissions_ErrorHandling(t *testing.T) {
 	t.Run("handles_invalid_permission_ids", func(t *testing.T) {
 		// buildRequiredResourceAccess should handle validation
-		resourceAccess, err := buildRequiredResourceAccess()
+		resourceAccess, err := buildRequiredResourceAccess(getRequiredPermissions())
 		require.NoError(t, err)
 		assert.NotEmpty(t, resourceAccess)
 	})
@@ -229,8 +230,8 @@ func TestServicePrincipalRollback(t *testing.T) {
 		})
 
 		// Execute in reverse
-		for i := len(config.rollback) - 1; i >= 0; i-- {
-			_ = config.rollback[i]()
+		for _, rollbackFunc := range slices.Backward(config.rollback) {
+			_ = rollbackFunc()
 		}
 
 		assert.Equal(t, []int{2, 1}, executionOrder, "Should execute in reverse order")

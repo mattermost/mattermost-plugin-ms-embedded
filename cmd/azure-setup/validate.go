@@ -20,22 +20,8 @@ import (
 
 // validateInputs validates all user inputs before proceeding
 func validateInputs(config *SetupConfig) error {
-	// Validate Mattermost site URL
-	if config.MattermostSiteURL == "" {
-		return errors.New("Mattermost site URL is required")
-	}
-
-	u, err := url.Parse(config.MattermostSiteURL)
-	if err != nil {
-		return errors.Wrap(err, "invalid Mattermost site URL")
-	}
-
-	if u.Scheme == "" || u.Host == "" {
-		return errors.New("Mattermost site URL must include protocol (https://) and hostname")
-	}
-
-	if u.Scheme != "https" {
-		return errors.New("Mattermost site URL must use HTTPS protocol")
+	if err := validateSiteURL(config.MattermostSiteURL); err != nil {
+		return err
 	}
 
 	// Validate app name
@@ -66,6 +52,30 @@ func validateInputs(config *SetupConfig) error {
 	return nil
 }
 
+// validateSiteURL checks that a Mattermost site URL is usable as the basis of
+// the Application ID URI: url.Parse accepts almost any non-empty string, so the
+// scheme and host are verified explicitly.
+func validateSiteURL(siteURL string) error {
+	if siteURL == "" {
+		return errors.New("Mattermost site URL is required")
+	}
+
+	u, err := url.Parse(siteURL)
+	if err != nil {
+		return errors.Wrap(err, "invalid Mattermost site URL")
+	}
+
+	if u.Scheme == "" || u.Host == "" {
+		return errors.New("Mattermost site URL must include protocol (https://) and hostname")
+	}
+
+	if u.Scheme != "https" {
+		return errors.New("Mattermost site URL must use HTTPS protocol")
+	}
+
+	return nil
+}
+
 // resolveCloud normalizes and validates a national cloud name supplied via the
 // --cloud flag and returns the resolved environment. Normalization (trim and
 // lowercase) matches cloudenv.EnvironmentFor so validation and resolution agree,
@@ -82,72 +92,107 @@ func resolveCloud(name string) (cloudenv.Environment, error) {
 	return cloudenv.EnvironmentFor(normalized), nil
 }
 
-// validatePermissions checks if the authenticated user has the necessary permissions
-func validatePermissions(ctx context.Context, client *msgraphsdk.GraphServiceClient, verbose bool) error {
-	if verbose {
-		fmt.Println("🔍 Checking user permissions...")
-	}
+// directoryContext describes the signed-in identity and the application
+// administration roles it holds.
+type directoryContext struct {
+	UserPrincipalName string
 
-	// Get the current user's service principal to check permissions
-	// We need to verify the user can create/manage applications
+	// AdminRoles lists the display names of the application administration roles
+	// held by the signed-in user.
+	AdminRoles []string
+
+	// RolesErr records a failure to read the directory role membership. Role
+	// lookup is not always permitted, so callers treat this as unknown rather
+	// than as a lack of permissions.
+	RolesErr error
+}
+
+// describeSignedInUser resolves who is signed in and which application
+// administration roles they hold.
+func describeSignedInUser(ctx context.Context, client *msgraphsdk.GraphServiceClient) (directoryContext, error) {
+	var directory directoryContext
+
 	me, err := client.Me().Get(ctx, nil)
 	if err != nil {
-		return errors.Wrap(err, "failed to get current user information")
+		return directory, errors.Wrap(err, "failed to get current user information")
 	}
 
-	if verbose {
-		fmt.Printf("   Authenticated as: %s\n", *me.GetUserPrincipalName())
+	if me == nil {
+		return directory, errors.New("Azure returned no information for the current user")
 	}
-
-	// Check if user has the necessary directory roles or permissions
-	// For creating apps, user needs one of:
-	// - Application Administrator role
-	// - Cloud Application Administrator role
-	// - Global Administrator role
-	// OR
-	// - Users can create applications setting enabled
+	directory.UserPrincipalName = derefString(me.GetUserPrincipalName())
 
 	memberOf, err := client.Me().MemberOf().Get(ctx, nil)
 	if err != nil {
+		directory.RolesErr = err
+		return directory, nil
+	}
+
+	if memberOf == nil {
+		return directory, nil
+	}
+
+	// memberOf returns groups as well as directory roles, so a user in a
+	// well-populated tenant can easily span several pages and have their
+	// administrator role land on a later one. Reading only the first page
+	// would report a Global Administrator as holding no admin role.
+	if err = iteratePages(ctx, client, memberOf,
+		models.CreateDirectoryObjectCollectionResponseFromDiscriminatorValue,
+		func(member models.DirectoryObjectable) {
+			directoryRole, ok := member.(models.DirectoryRoleable)
+			if !ok || directoryRole.GetRoleTemplateId() == nil {
+				return
+			}
+
+			if isApplicationAdminRole(*directoryRole.GetRoleTemplateId()) {
+				directory.AdminRoles = append(directory.AdminRoles, derefString(directoryRole.GetDisplayName()))
+			}
+		}); err != nil {
+		directory.RolesErr = err
+	}
+
+	return directory, nil
+}
+
+// validatePermissions checks if the authenticated user has the necessary permissions
+// to create and manage applications: an Application Administrator, Cloud Application
+// Administrator, or Global Administrator role, or a tenant that lets users create
+// applications. Missing roles are reported as a warning so the operation can still
+// proceed and fail on the actual Graph call if permissions turn out to be too narrow.
+func validatePermissions(ctx context.Context, client *msgraphsdk.GraphServiceClient, verbose bool) error {
+	if verbose {
+		progressln("🔍 Checking user permissions...")
+	}
+
+	directory, err := describeSignedInUser(ctx, client)
+	if err != nil {
+		return err
+	}
+
+	if verbose {
+		progressf("   Authenticated as: %s\n", directory.UserPrincipalName)
+	}
+
+	if directory.RolesErr != nil {
 		// Always show this warning as it's important for users to know
-		fmt.Println("⚠️  Warning: Could not check directory roles")
+		progressln("⚠️  Warning: Could not check directory roles")
 		if verbose {
-			fmt.Printf("   Error details: %v\n", err)
+			progressf("   Error details: %v\n", directory.RolesErr)
 		}
-		// Don't fail here - proceed and let the actual operations fail if needed
 		return nil
 	}
 
-	// Check for admin roles
-	hasAdminRole := false
-	if memberOf != nil && memberOf.GetValue() != nil {
-		for _, member := range memberOf.GetValue() {
-			if directoryRole, ok := member.(models.DirectoryRoleable); ok {
-				roleTemplate := directoryRole.GetRoleTemplateId()
-				if roleTemplate != nil {
-					roleID := *roleTemplate
-					// Check for known admin role template IDs
-					if isApplicationAdminRole(roleID) {
-						hasAdminRole = true
-						if verbose {
-							fmt.Printf("   ✅ User has admin role: %s\n", *directoryRole.GetDisplayName())
-						}
-						break
-					}
-				}
-			}
-		}
-	}
-
-	if !hasAdminRole {
+	if len(directory.AdminRoles) == 0 {
 		// Always show this warning as it's critical for users to know
-		fmt.Println("⚠️  Warning: User may not have Application Administrator permissions")
-		fmt.Println("   Setup will proceed, but may fail if permissions are insufficient")
-		fmt.Println("   Required role: Application Administrator, Cloud Application Administrator, or Global Administrator")
+		progressln("⚠️  Warning: User may not have Application Administrator permissions")
+		progressln("   Setup will proceed, but may fail if permissions are insufficient")
+		progressln("   Required role: Application Administrator, Cloud Application Administrator, or Global Administrator")
+		return nil
 	}
 
-	if verbose && hasAdminRole {
-		fmt.Println("✅ User has sufficient permissions")
+	if verbose {
+		progressf("   ✅ User has admin role: %s\n", strings.Join(directory.AdminRoles, ", "))
+		progressln("✅ User has sufficient permissions")
 	}
 
 	return nil
@@ -175,7 +220,7 @@ func escapeODataString(s string) string {
 // checkExistingApp checks if an application with the given name or client ID already exists
 func checkExistingApp(ctx context.Context, client *msgraphsdk.GraphServiceClient, appName, clientID string, verbose bool) (models.Applicationable, error) {
 	if verbose {
-		fmt.Println("🔍 Checking for existing application...")
+		progressln("🔍 Checking for existing application...")
 	}
 
 	var filter string
@@ -195,7 +240,7 @@ func checkExistingApp(ctx context.Context, client *msgraphsdk.GraphServiceClient
 	apps, err := client.Applications().Get(ctx, &applications.ApplicationsRequestBuilderGetRequestConfiguration{
 		QueryParameters: &applications.ApplicationsRequestBuilderGetQueryParameters{
 			Filter: &filter,
-			Select: []string{"id", "appId", "displayName", "api", "identifierUris", "signInAudience"},
+			Select: []string{"id", "appId", "displayName", "api", "identifierUris", "signInAudience", "requiredResourceAccess"},
 		},
 	})
 	if err != nil {
@@ -204,14 +249,14 @@ func checkExistingApp(ctx context.Context, client *msgraphsdk.GraphServiceClient
 
 	if apps == nil || apps.GetValue() == nil || len(apps.GetValue()) == 0 {
 		if verbose {
-			fmt.Println("   No existing application found")
+			progressln("   No existing application found")
 		}
 		return nil, nil
 	}
 
 	existingApp := apps.GetValue()[0]
 	if verbose {
-		fmt.Printf("   ✅ Found existing application: %s (ID: %s)\n",
+		progressf("   ✅ Found existing application: %s (ID: %s)\n",
 			*existingApp.GetDisplayName(),
 			*existingApp.GetAppId())
 	}
@@ -251,7 +296,7 @@ func buildApplicationIDURI(siteURL, clientID string) (string, error) {
 // getTenantID retrieves the tenant ID from the Azure organization
 func getTenantID(ctx context.Context, client *msgraphsdk.GraphServiceClient, verbose bool) (string, error) {
 	if verbose {
-		fmt.Println("🔍 Retrieving tenant ID from Azure...")
+		progressln("🔍 Retrieving tenant ID from Azure...")
 	}
 
 	// Get organization details to retrieve tenant ID
@@ -271,8 +316,18 @@ func getTenantID(ctx context.Context, client *msgraphsdk.GraphServiceClient, ver
 	}
 
 	if verbose {
-		fmt.Printf("   ✅ Tenant ID: %s\n", *tenantID)
+		progressf("   ✅ Tenant ID: %s\n", *tenantID)
 	}
 
 	return *tenantID, nil
+}
+
+// adminConsentURL builds the Azure portal deep link an administrator uses to
+// grant admin consent for the application's API permissions.
+func adminConsentURL(portalHost, clientID string) string {
+	if portalHost == "" {
+		portalHost = "portal.azure.com"
+	}
+
+	return fmt.Sprintf("https://%s/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/CallAnAPI/appId/%s", portalHost, clientID)
 }

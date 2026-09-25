@@ -28,6 +28,11 @@ This CLI tool automates the Azure AD application registration and configuration 
 - Interactive browser
 - Device code flow
 
+✅ **Configuration Doctor**
+- Audits an existing registration without changing anything
+- Checks the app, exposed API, permissions, admin consent, secrets, and housekeeping
+- Produces a human, JSON, or Markdown report and exits non-zero on failures
+
 ✅ **Safety Features**
 - Dry-run mode to preview changes
 - Rollback on errors
@@ -106,7 +111,15 @@ azure-setup create \
   --verbose
 ```
 
-### 4. View Output in Different Formats
+### 4. Audit an Existing Application
+
+```bash
+azure-setup doctor \
+  --client-id "abc123-def456-..." \
+  --site-url https://mattermost.example.com
+```
+
+### 5. View Output in Different Formats
 
 ```bash
 # Human-readable (default)
@@ -137,6 +150,7 @@ Create or update an Azure AD application with all required configuration.
 | `--tenant-id` | string | No | - | Azure AD Tenant ID (auto-detected if omitted) |
 | `--client-id` | string | No | - | Existing app client ID (for updates) |
 | `--secret-expiration` | int | No | 12 | Secret expiration in months (1-24) |
+| `--create-doctor-requirements` | bool | No | false | Also request the read-only Graph permissions `doctor` needs |
 | `--dry-run` | bool | No | false | Preview changes without applying |
 | `--verbose` / `-v` | bool | No | false | Enable verbose output |
 | `--output` / `-o` | string | No | "human" | Output format: human, json, env, mattermost |
@@ -180,6 +194,178 @@ Validate Azure credentials and permissions without making changes.
 
 ```bash
 azure-setup validate --verbose
+```
+
+### Permissions for the doctor
+
+`azure-setup doctor` reads more of the directory than the plugin itself does, so
+it needs two read-only Graph **application** permissions that the plugin never
+uses: `Application.Read.All` and `Directory.Read.All`.
+
+`--create-doctor-requirements` requests them on the same registration:
+
+```bash
+azure-setup create \
+  --site-url https://mattermost.example.com \
+  --create-doctor-requirements
+```
+
+The permission IDs are resolved from the Microsoft Graph service principal at
+run time rather than hardcoded, so an unrecognised permission name fails with a
+clear error instead of a rejected request.
+
+**Security note.** Azure scopes permissions per *application*, not per
+credential: every secret on this registration requests
+`https://graph.microsoft.com/.default` and receives a token carrying every
+consented app role. Once you grant consent, the client secret the plugin uses
+also has tenant-wide directory read. If you need the plugin credential to stay
+minimal, create a separate app registration for the doctor instead and leave
+this flag off.
+
+Admin consent still has to be granted by hand — it requires Privileged Role
+Administrator or Global Administrator, which Application Administrator does not
+cover. The consent link printed by `create` covers the added permissions too.
+
+Re-running `create` **without** the flag does not remove the permissions: the
+tool carries over any permission already on the application that it does not
+manage, so rotating the plugin secret will not break the doctor.
+
+### Cross-checking the Teams app manifest
+
+The registration is only one side of the contract. Teams requests an SSO token for the
+audience named in the manifest's `webApplicationInfo.resource`, so a registration that is
+perfect on its own still fails if the manifest disagrees with it. Pass `--manifest` to
+check both sides together:
+
+```bash
+azure-setup doctor \
+  --client-id "abc123-def456-..." \
+  --manifest com.mattermost.ms.embedded-1.0.8.zip
+```
+
+Either the `.zip` app package downloaded from the plugin's settings page or a bare
+`manifest.json` works; the format is detected from the file contents, not the extension,
+so a renamed download is fine.
+
+When `--site-url` is omitted, `--manifest` reports the manifest host in the report
+header without populating the site URL input. The Application ID URI check then verifies
+only its shape; pass `--site-url` to verify the registration against a Mattermost server.
+
+This also runs the lookup the plugin itself performs before sending a notification
+(`externalId eq '<manifest id>'` against the Teams app catalog, falling back to the
+catalog ID because Graph leaves `externalId` empty for store-distributed apps), so it
+catches an app that was never uploaded or is a version behind. That needs
+`AppCatalog.Read.All`; without it the check reports SKIP rather than failing.
+
+**What it cannot check:** Graph does not expose `webApplicationInfo` on a published app,
+so the catalog half confirms presence, version and publishing state only. The contents
+are verified against the file you pass in.
+
+### `azure-setup doctor`
+
+Audit an existing Azure AD application and report whether every setting the plugin
+depends on is configured correctly. The doctor is read-only: it never changes Azure.
+
+**Checks performed:**
+
+| Category | Checks |
+|----------|--------|
+| Identity & access | Sign-in succeeds, the signed-in user holds an application administration role, tenant is resolved |
+| Application registration | The application exists, is single tenant, and its Application ID URI matches the Mattermost site URL |
+| Exposed API | The `access_as_user` scope is exposed, enabled, user-consentable, and fully described; every Microsoft first-party client (Teams, Outlook, Office, Copilot) is pre-authorized for it |
+| API permissions | `User.Read`, `TeamsActivity.Send`, and `AppCatalog.Read.All` are requested with the correct type. Any other permission — including the doctor's own `Application.Read.All` / `Directory.Read.All` — is listed but never affects the status; names are resolved from the Microsoft Graph service principal, falling back to the raw permission ID when a name cannot be resolved |
+| Admin consent | A service principal exists and is enabled, and each application permission has been consented tenant-wide. Delegated permissions are reported but only warn: the plugin authenticates app-only, so an unconsented delegated permission does not block it |
+| Credentials | At least one client secret is valid, with a warning before it expires; expired secrets and certificates are reported |
+| Housekeeping | The application has owners, and no other registration shares its display name |
+| Teams app manifest | With `--manifest`: the SSO audience, client ID, valid domains, tab URLs, notification permission, package icons, and whether the app is published in the tenant's Teams catalog |
+
+**Flags:**
+
+| Flag | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `--client-id` | string | No | - | Client ID of the application to inspect (preferred over `--app-name`) |
+| `--app-name` | string | No | "Mattermost for Teams" | Display name to look up when `--client-id` is not given |
+| `--site-url` | string | No | - | Mattermost site URL, used to verify the Application ID URI |
+| `--manifest` | string | No | - | Teams app package (`.zip`) or `manifest.json` to cross-check against the registration |
+| `--tenant-id` | string | No | - | Azure AD Tenant ID (auto-detected if omitted) |
+| `--output` / `-o` | string | No | "human" | Report format: human, json, markdown |
+| `--report-file` | string | No | - | Also write the report to this file |
+| `--secret-warning-days` | int | No | 30 | Warn when a client secret expires within this many days |
+| `--cloud` | string | No | "commercial" | Microsoft national cloud: commercial, gcchigh, dod |
+| `--verbose` / `-v` | bool | No | false | Enable verbose output |
+
+**Exit code:** `0` when every check passes or only warnings are raised, non-zero when
+any check fails. This makes the doctor usable as a health check in CI or a cron job.
+
+A check that could not run — because the credential cannot read the consent
+grants, for example — is reported as `SKIP` and downgrades the overall verdict to
+`warn`, never `pass`, so an incomplete report cannot be mistaken for a clean one.
+Automation that needs certainty should assert on `summary.status == "pass"` in the
+JSON output rather than on the exit code alone. Failing to read the application
+at all is the exception: nothing was verified, so the command exits non-zero.
+
+Running with application credentials is fully supported and does not degrade the
+verdict. Microsoft Graph only exposes the signed-in user to delegated flows, so
+the report notes there is no user and omits the directory-roles check rather than
+skipping it — the doctor never writes, so the operator's own roles do not affect
+what it can determine.
+
+**Examples:**
+
+```bash
+# Full audit of a known application
+azure-setup doctor \
+  --client-id "abc123-def456-..." \
+  --site-url https://mattermost.example.com
+
+# Save a Markdown report to attach to a support ticket
+azure-setup doctor \
+  --client-id "abc123-def456-..." \
+  --site-url https://mattermost.example.com \
+  --output markdown \
+  --report-file azure-report.md
+
+# Machine-readable output for monitoring
+azure-setup doctor --client-id "abc123-def456-..." -o json
+```
+
+**Sample report:**
+
+```
+======================================================================
+🩺 AZURE SETUP DOCTOR REPORT
+======================================================================
+Generated:             2026-01-15 12:00:00 UTC
+National cloud:        commercial
+Tenant ID:             8f2b1a90-1111-2222-3333-444455556666
+Signed in as:          admin@contoso.onmicrosoft.com
+Application:           Mattermost for Teams
+Client ID:             11111111-2222-3333-4444-555555555555
+Application ID URI:    api://mattermost.example.com/11111111-...
+
+Exposed API
+----------------------------------------------------------------------
+✅ Exposed scope (access_as_user)
+     Exposed, enabled, and consentable by users
+❌ Pre-authorized Microsoft clients
+     2 of 9 Microsoft clients are not pre-authorized for access_as_user,
+     so SSO will prompt for consent there
+       - missing: 5e3ce6c0-... (Microsoft Teams web)
+       - missing: 1fec8e78-... (Microsoft Teams desktop and mobile)
+     ↳ Fix: Re-run `azure-setup create --client-id 11111111-...`
+
+======================================================================
+SUMMARY: 12 passed · 2 warning(s) · 2 failed · 0 skipped
+======================================================================
+❌ The Azure application is not fully configured - the plugin may not work.
+
+📝 ACTION ITEMS
+----------------------------------------------------------------------
+1. [FAIL] Pre-authorized Microsoft clients: 2 of 9 Microsoft clients are
+   not pre-authorized for access_as_user
+   → Re-run `azure-setup create --client-id 11111111-...`
+2. [WARN] Client secrets: Every valid secret expires within 30 day(s)
+   → Rotate the client secret before it expires to avoid an outage
 ```
 
 ## Authentication Methods
@@ -265,6 +451,10 @@ azure-setup create --site-url https://mm.example.com -o mattermost > plugin-conf
 
 ## Troubleshooting
 
+Start with `azure-setup doctor --client-id <id> --site-url <url>`: it inspects the
+live registration and prints the exact settings that are missing or wrong, together
+with the command or portal link that fixes each one.
+
 ### Authentication Failures
 
 **Problem:** "Failed to authenticate to Azure"
@@ -288,6 +478,23 @@ azure-setup create --site-url https://mm.example.com -o mattermost > plugin-conf
 **Problem:** Errors appear even in dry-run mode
 
 **Solution:** Dry-run validation errors indicate issues with input parameters, not Azure operations. Fix the parameters and try again.
+
+### SSO Prompts for Consent Inside Teams or Outlook
+
+**Problem:** Users are asked to consent when opening the tab, or sign-in fails silently
+
+**Solutions:**
+- Run `azure-setup doctor` and look at the **Exposed API** and **Admin consent** sections
+- A missing pre-authorized client means SSO will prompt in that specific Microsoft app
+- Missing admin consent means the permission was requested but never granted
+
+### The Plugin Stops Working After Months
+
+**Problem:** Authentication worked and then began failing
+
+**Solution:** The client secret has most likely expired. Run `azure-setup doctor` to see
+every secret and its expiry date, then rotate it with
+`azure-setup create --client-id <id> --site-url <url>`.
 
 ## Security Best Practices
 
