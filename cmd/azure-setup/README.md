@@ -247,10 +247,9 @@ Either the `.zip` app package downloaded from the plugin's settings page or a ba
 `manifest.json` works; the format is detected from the file contents, not the extension,
 so a renamed download is fine.
 
-`--manifest` supplies the site URL when `--site-url` is omitted, but never the client ID.
-Reading both sides of the client ID comparison out of the same file would make it
-vacuous — a manifest pointing at the wrong registration would go unnoticed. The report
-header marks a site URL that was inferred.
+When `--site-url` is omitted, `--manifest` reports the manifest host in the report
+header without populating the site URL input. The Application ID URI check then verifies
+only its shape; pass `--site-url` to verify the registration against a Mattermost server.
 
 This also runs the lookup the plugin itself performs before sending a notification
 (`externalId eq '<manifest id>'` against the Teams app catalog, falling back to the
@@ -286,7 +285,7 @@ depends on is configured correctly. The doctor is read-only: it never changes Az
 |------|------|----------|---------|-------------|
 | `--client-id` | string | No | - | Client ID of the application to inspect (preferred over `--app-name`) |
 | `--app-name` | string | No | "Mattermost for Teams" | Display name to look up when `--client-id` is not given |
-| `--site-url` | string | No | - | Mattermost site URL, used to verify the Application ID URI. Derived from `--manifest` when omitted |
+| `--site-url` | string | No | - | Mattermost site URL, used to verify the Application ID URI |
 | `--manifest` | string | No | - | Teams app package (`.zip`) or `manifest.json` to cross-check against the registration |
 | `--tenant-id` | string | No | - | Azure AD Tenant ID (auto-detected if omitted) |
 | `--output` / `-o` | string | No | "human" | Report format: human, json, markdown |

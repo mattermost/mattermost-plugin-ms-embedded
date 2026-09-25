@@ -86,10 +86,9 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	progressln("🩺 Running Azure configuration doctor...")
 
-	// Loaded before authenticating so a malformed package fails fast, and
-	// because it can supply the site URL the Application ID URI is checked
-	// against. It deliberately never supplies the client ID: both sides of that
-	// comparison coming from the same file would make the check vacuous.
+	// Loaded before authenticating so a malformed package fails fast. When
+	// --site-url is omitted, its host is reported as context without supplying
+	// the site URL used by the Application ID URI check.
 	manifest, manifestErr := loadDoctorManifest(report)
 
 	client, err := connectDoctor(ctx, env, report)
@@ -277,6 +276,10 @@ func inspectApplication(ctx context.Context, client *msgraphsdk.GraphServiceClie
 
 	report.Add(checkApplicationLookup(report, matches))
 
+	// Keep the Application ID URI check anchored to the Graph application
+	// registration: SiteURL contains only --site-url, and
+	// checkApplicationIDURI derives the client ID from app. ManifestHost is
+	// report context only.
 	inputs := doctorInputs{
 		App:               app,
 		SiteURL:           report.MattermostSiteURL,
@@ -338,9 +341,8 @@ func checkApplicationLookup(report *DoctorReport, matches int) CheckResult {
 }
 
 // loadDoctorManifest reads the manifest named by --manifest and records it on
-// the report. When --site-url was not given, the host the manifest itself
-// claims is used instead, so a package alone is enough to verify the
-// Application ID URI.
+// the report. When --site-url was not given, it reports the manifest host
+// without populating the site URL input used by the Application ID URI check.
 func loadDoctorManifest(report *DoctorReport) (*teamsManifest, error) {
 	if flagManifest == "" {
 		return nil, nil
@@ -353,12 +355,9 @@ func loadDoctorManifest(report *DoctorReport) (*teamsManifest, error) {
 
 	report.ManifestPath = manifest.SourcePath
 
-	// The site URL is deliberately NOT taken from the manifest. Building the
-	// expected Application ID URI out of the manifest and then comparing it to
-	// the registration would be circular: checkApplicationIDURI would pass even
-	// when both sides name the wrong server. The manifest is cross-checked
-	// against the registration directly instead, which is a real comparison
-	// between two independent sources.
+	// The host is report context only. checkApplicationIDURI compares a provided
+	// site URL with the Graph application registration and derives the client ID
+	// from that registration.
 	if flagSiteURL == "" {
 		report.ManifestHost = manifestResourceHost(manifest)
 	}
