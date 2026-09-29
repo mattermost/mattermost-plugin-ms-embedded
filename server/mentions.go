@@ -326,7 +326,7 @@ func (p *NotificationsParser) sendUserActivity(userActivity *UserActivity) error
 	}, map[string]string{
 		"post_author": sender.GetDisplayName(model.ShowNicknameFullName),
 	}); err != nil {
-		p.PAPI.LogError("Failed to send user activity notification", "error", err.Error())
+		return fmt.Errorf("failed to send user activity notification: %w", err)
 	}
 
 	return nil
