@@ -287,7 +287,7 @@ depends on is configured correctly. The doctor is read-only: it never changes Az
 | `--app-name` | string | No | "Mattermost for Teams" | Display name to look up when `--client-id` is not given |
 | `--site-url` | string | No | - | Mattermost site URL, used to verify the Application ID URI |
 | `--manifest` | string | No | - | Teams app package (`.zip`) or `manifest.json` to cross-check against the registration |
-| `--tenant-id` | string | No | - | Azure AD Tenant ID (auto-detected if omitted) |
+| `--tenant-id` | string | No | - | Azure AD Tenant ID (auto-detected if omitted); the Tenant check fails if it differs from the tenant actually signed in to |
 | `--output` / `-o` | string | No | "human" | Report format: human, json, markdown |
 | `--report-file` | string | No | - | Also write the report to this file |
 | `--secret-warning-days` | int | No | 30 | Warn when a client secret expires within this many days |

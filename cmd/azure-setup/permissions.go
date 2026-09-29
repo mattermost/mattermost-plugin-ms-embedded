@@ -16,15 +16,9 @@ import (
 	"github.com/pkg/errors"
 )
 
-// resolvePermissions returns every Graph permission this run will request: the
-// ones the plugin needs, plus the read-only ones the doctor needs when
-// --create-doctor-requirements was given.
-//
-// It is called before the pre-flight confirmation rather than inside
-// configureAPIPermissions so that the list the operator approves is the same
-// list that gets requested. The doctor permissions are the two the README
-// warns about - they grant the plugin's own client secret tenant-wide
-// directory read - so they are the last thing a consent prompt should omit.
+// resolvePermissions returns every Graph permission this run will request. It
+// runs before the pre-flight confirmation so the operator approves exactly the
+// list that gets requested, including the doctor's directory-read roles.
 func resolvePermissions(ctx context.Context, client *msgraphsdk.GraphServiceClient, config *SetupConfig) ([]requiredPermission, error) {
 	permissions := getRequiredPermissions()
 

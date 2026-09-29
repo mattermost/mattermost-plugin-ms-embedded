@@ -142,7 +142,7 @@ func (r *DoctorReport) Finalize() {
 
 	// A skipped check is an unverified check. Leaving the verdict at "pass"
 	// would let an incomplete run - a credential that cannot read the consent
-	// grants, say - report a clean bill of health and exit 0 in CI.
+	// grants, say - report a clean bill of health in summary.status.
 	switch {
 	case summary.Failed > 0:
 		summary.Status = StatusFail

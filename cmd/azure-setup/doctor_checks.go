@@ -73,11 +73,13 @@ type doctorInputs struct {
 	DuplicateClientIDs []string
 	DuplicatesErr      error
 
+	// DuplicatesReported omits the duplicate check because the ambiguous
+	// display-name lookup already failed with the same registrations.
+	DuplicatesReported bool
+
 	// Manifest is the Teams app manifest to cross-check against the
-	// registration, set only when --manifest was given. ManifestErr records why
-	// it could not be read.
-	Manifest    *teamsManifest
-	ManifestErr error
+	// registration, set only when --manifest was given.
+	Manifest *teamsManifest
 
 	// CatalogApp is the app published to the tenant's Teams catalog that
 	// corresponds to the manifest, or nil when none matched.
@@ -89,12 +91,6 @@ type doctorInputs struct {
 // runDoctorChecks evaluates every configuration rule against the data gathered
 // from Azure and returns the results in report order.
 func runDoctorChecks(in doctorInputs) []CheckResult {
-	// Zero is a deliberate request to suppress expiry warnings and is honoured;
-	// only a negative window is meaningless and falls back to the default.
-	if in.SecretWarningDays < 0 {
-		in.SecretWarningDays = DefaultSecretWarningDays
-	}
-
 	checks := []CheckResult{
 		checkSignInAudience(in.App),
 		checkApplicationIDURI(in.App, in.SiteURL),
@@ -107,7 +103,10 @@ func runDoctorChecks(in doctorInputs) []CheckResult {
 		checkClientSecrets(in.App, in.Now, in.SecretWarningDays),
 		checkCertificates(in.App, in.Now),
 		checkOwners(in.Owners, in.OwnersErr),
-		checkDuplicateApplications(in.App, in.DuplicateClientIDs, in.DuplicatesErr),
+	}
+
+	if !in.DuplicatesReported {
+		checks = append(checks, checkDuplicateApplications(in.App, in.DuplicateClientIDs, in.DuplicatesErr))
 	}
 
 	return append(checks, manifestChecks(in)...)
@@ -118,18 +117,8 @@ func runDoctorChecks(in doctorInputs) []CheckResult {
 // optional, and emitting skips for it would downgrade every run that does not
 // use it.
 func manifestChecks(in doctorInputs) []CheckResult {
-	if in.Manifest == nil && in.ManifestErr == nil {
+	if in.Manifest == nil {
 		return nil
-	}
-
-	if in.ManifestErr != nil {
-		return []CheckResult{{
-			Category:    CategoryManifest,
-			Name:        "Manifest readable",
-			Status:      StatusFail,
-			Summary:     in.ManifestErr.Error(),
-			Remediation: "Pass the app package downloaded from the plugin settings page, or the manifest.json inside it",
-		}}
 	}
 
 	var checks []CheckResult
@@ -215,19 +204,34 @@ func checkApplicationIDURI(app models.Applicationable, siteURL string) CheckResu
 		// Only the scheme and the trailing client ID are checked here, both of
 		// which Azure stores in a fixed case; the path in between is not
 		// inspected without a --site-url to compare it against.
-		configured := strings.ToLower(uris[0])
 		suffix := strings.ToLower("/" + clientID)
+		shaped := ""
+		for _, uri := range uris {
+			configured := strings.ToLower(uri)
+			if strings.HasPrefix(configured, "api://") && strings.HasSuffix(configured, suffix) {
+				shaped = uri
+				break
+			}
+		}
 
-		if strings.HasPrefix(configured, "api://") && strings.HasSuffix(configured, suffix) {
-			result.Status = StatusPass
-			result.Summary = fmt.Sprintf("%s has the expected api://<host>/<client-id> shape", uris[0])
-			result.Details = append(result.Details, "pass --site-url to verify the host matches the Mattermost server")
+		if shaped == "" {
+			result.Status = StatusWarn
+			result.Summary = fmt.Sprintf("No identifier URI looks like api://<host>/<client-id> (checked %d)", len(uris))
+			result.Remediation = "Re-run the doctor with --site-url to verify the URI against the Mattermost server URL"
 			return result
 		}
 
-		result.Status = StatusWarn
-		result.Summary = fmt.Sprintf("%s does not look like api://<host>/<client-id>", uris[0])
-		result.Remediation = "Re-run the doctor with --site-url to verify the URI against the Mattermost server URL"
+		result.Details = append(result.Details, "pass --site-url to verify the host matches the Mattermost server")
+
+		if len(uris) > 1 {
+			result.Status = StatusWarn
+			result.Summary = fmt.Sprintf("%s has the expected shape, but %d identifier URIs are configured", shaped, len(uris))
+			result.Remediation = "Remove the unused identifier URIs in the Azure Portal to avoid ambiguous token audiences"
+			return result
+		}
+
+		result.Status = StatusPass
+		result.Summary = fmt.Sprintf("%s has the expected api://<host>/<client-id> shape", shaped)
 		return result
 	}
 
@@ -417,7 +421,7 @@ func checkRequiredPermissions(app models.Applicationable, permissionNames map[st
 				continue
 			}
 
-			configured[permissionKey{id: id, permType: accessType}] = true
+			configured[permissionKey{id: strings.ToLower(id), permType: strings.ToLower(accessType)}] = true
 
 			if isRequiredPermission(id, accessType) {
 				continue
@@ -435,7 +439,7 @@ func checkRequiredPermissions(app models.Applicationable, permissionNames map[st
 
 	var missing []string
 	for _, perm := range getRequiredPermissions() {
-		if configured[permissionKey{id: perm.ResourceID, permType: perm.Type}] {
+		if configured[permissionKey{id: strings.ToLower(perm.ResourceID), permType: strings.ToLower(perm.Type)}] {
 			result.Details = append(result.Details, fmt.Sprintf("%s (%s): requested", perm.Name, permissionKindLabel(perm.Type)))
 			continue
 		}
@@ -810,7 +814,7 @@ func allScopeNames(app models.Applicationable) []string {
 // one this tool configures.
 func isRequiredPermission(id, permType string) bool {
 	for _, perm := range getRequiredPermissions() {
-		if strings.EqualFold(perm.ResourceID, id) && perm.Type == permType {
+		if strings.EqualFold(perm.ResourceID, id) && strings.EqualFold(perm.Type, permType) {
 			return true
 		}
 	}
@@ -844,7 +848,7 @@ func describeGraphPermission(names map[string]string, id string) string {
 
 // permissionKindLabel renders a Graph permission type the way the Azure Portal does.
 func permissionKindLabel(permType string) string {
-	if permType == PermissionTypeRole {
+	if strings.EqualFold(permType, PermissionTypeRole) {
 		return "Application"
 	}
 

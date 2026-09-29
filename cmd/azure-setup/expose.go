@@ -124,13 +124,8 @@ func configureAPIExposure(ctx context.Context, client *msgraphsdk.GraphServiceCl
 // app, or uuid.Nil if none is found. Used to avoid generating a duplicate scope ID
 // when configureAPIExposure is called against an already-configured application.
 func findExistingScopeID(app models.Applicationable) uuid.UUID {
-	if app.GetApi() == nil {
-		return uuid.Nil
-	}
-	for _, scope := range app.GetApi().GetOauth2PermissionScopes() {
-		if scope.GetValue() != nil && *scope.GetValue() == ScopeName && scope.GetId() != nil {
-			return *scope.GetId()
-		}
+	if scope := findScopeByName(app, ScopeName); scope != nil && scope.GetId() != nil {
+		return *scope.GetId()
 	}
 	return uuid.Nil
 }

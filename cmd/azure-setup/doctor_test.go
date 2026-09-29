@@ -224,6 +224,23 @@ func TestCheckApplicationIDURI(t *testing.T) {
 		app.SetIdentifierUris([]string{"https://example.com/app"})
 		assert.Equal(t, StatusWarn, checkApplicationIDURI(app, "").Status)
 	})
+
+	t.Run("without a site URL every URI is considered", func(t *testing.T) {
+		expected := "api://mattermost.example.com/" + testClientID
+
+		for _, uris := range [][]string{
+			{"api://legacy", expected},
+			{expected, "api://legacy"},
+		} {
+			app := healthyApp(t)
+			app.SetIdentifierUris(uris)
+
+			result := checkApplicationIDURI(app, "")
+			assert.Equal(t, StatusWarn, result.Status, uris)
+			assert.Contains(t, result.Summary, expected, uris)
+			assert.Contains(t, result.Summary, "2 identifier URIs", uris)
+		}
+	})
 }
 
 func TestCheckExposedScope(t *testing.T) {
@@ -352,6 +369,19 @@ func TestCheckRequiredPermissions(t *testing.T) {
 		result := checkRequiredPermissions(app, nil)
 		assert.Equal(t, StatusFail, result.Status)
 		assert.Contains(t, result.Summary, "User.Read")
+	})
+
+	t.Run("permission type casing is ignored", func(t *testing.T) {
+		app := healthyApp(t)
+		for _, resource := range app.GetRequiredResourceAccess() {
+			for _, access := range resource.GetResourceAccess() {
+				access.SetTypeEscaped(ptr(strings.ToLower(derefString(access.GetTypeEscaped()))))
+			}
+		}
+
+		result := checkRequiredPermissions(app, nil)
+		assert.Equal(t, StatusPass, result.Status)
+		assert.NotContains(t, strings.Join(result.Details, "\n"), "not managed by this tool")
 	})
 }
 
@@ -505,20 +535,6 @@ func TestCheckClientSecrets(t *testing.T) {
 		in.SecretWarningDays = 0
 
 		assert.Equal(t, StatusPass, statusOfCheck(t, runDoctorChecks(in), "Client secrets"))
-	})
-
-	t.Run("a negative window falls back to the default", func(t *testing.T) {
-		app := healthyApp(t)
-		app.SetPasswordCredentials([]models.PasswordCredentialable{
-			passwordCredential("expiring tomorrow", now.AddDate(0, 0, 1)),
-		})
-
-		in := healthyInputs(t)
-		in.App = app
-		in.Now = now
-		in.SecretWarningDays = -1
-
-		assert.Equal(t, StatusWarn, statusOfCheck(t, runDoctorChecks(in), "Client secrets"))
 	})
 
 	t.Run("only secret expires soon", func(t *testing.T) {
@@ -729,6 +745,35 @@ func TestAdminConsentURL(t *testing.T) {
 	assert.Contains(t, adminConsentURL("", testClientID), "portal.azure.com")
 }
 
+func TestCheckTenant(t *testing.T) {
+	const tenantA = "11111111-1111-1111-1111-111111111111"
+	const tenantB = "22222222-2222-2222-2222-222222222222"
+
+	t.Run("no --tenant-id", func(t *testing.T) {
+		result := checkTenant("", tenantA, nil)
+		assert.Equal(t, StatusPass, result.Status)
+		assert.Contains(t, result.Summary, tenantA)
+	})
+
+	t.Run("--tenant-id matches, ignoring case", func(t *testing.T) {
+		assert.Equal(t, StatusPass, checkTenant(strings.ToUpper(tenantA), tenantA, nil).Status)
+	})
+
+	t.Run("--tenant-id differs from the signed-in tenant", func(t *testing.T) {
+		result := checkTenant(tenantA, tenantB, nil)
+		assert.Equal(t, StatusFail, result.Status)
+		assert.Contains(t, result.Summary, tenantA)
+		assert.Contains(t, result.Summary, tenantB)
+		assert.Contains(t, result.Remediation, "AZURE_TENANT_ID")
+	})
+
+	t.Run("lookup failed with --tenant-id", func(t *testing.T) {
+		result := checkTenant(tenantA, "", assert.AnError)
+		assert.Equal(t, StatusSkip, result.Status)
+		assert.Contains(t, result.Summary, "Could not confirm --tenant-id "+tenantA)
+	})
+}
+
 func TestCheckDirectoryRoles(t *testing.T) {
 	t.Run("holds an admin role", func(t *testing.T) {
 		directory := directoryContext{UserPrincipalName: "admin@example.com", AdminRoles: []string{"Global Administrator"}}
@@ -751,12 +796,26 @@ func TestCheckApplicationLookup(t *testing.T) {
 		ApplicationObjectID: testObjectID,
 	}
 
-	assert.Equal(t, StatusPass, checkApplicationLookup(report, 1).Status)
+	assert.Equal(t, StatusPass, checkApplicationLookup(report, []string{testClientID}).Status)
 
-	ambiguous := checkApplicationLookup(report, 3)
+	ambiguous := checkApplicationLookup(report, []string{testClientID, "other-client-id", "third-client-id"})
 	assert.Equal(t, StatusFail, ambiguous.Status)
+	assert.Contains(t, ambiguous.Summary, "3 applications")
 	assert.Contains(t, ambiguous.Summary, testObjectID)
 	assert.Contains(t, ambiguous.Remediation, "--client-id")
+	assert.Equal(t, []string{
+		"also registered as client ID other-client-id",
+		"also registered as client ID third-client-id",
+	}, ambiguous.Details)
+}
+
+func TestDuplicateCheckIsOmittedWhenTheLookupAlreadyReportedThem(t *testing.T) {
+	in := healthyInputs(t)
+	in.DuplicatesReported = true
+
+	for _, check := range runDoctorChecks(in) {
+		assert.NotEqual(t, "Duplicate registrations", check.Name)
+	}
 }
 
 func TestNormalizeReportFormat(t *testing.T) {

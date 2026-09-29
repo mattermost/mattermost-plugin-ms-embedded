@@ -81,13 +81,19 @@ type teamsManifest struct {
 // is routinely renamed.
 func loadManifest(path string) (*teamsManifest, error) {
 	// The path comes from the operator's own --manifest flag.
-	data, err := os.ReadFile(path) // #nosec G304
+	file, err := os.Open(path) // #nosec G304
+	if err != nil {
+		return nil, errors.Wrapf(err, "failed to read %s", path)
+	}
+	defer func() { _ = file.Close() }()
+
+	data, err := io.ReadAll(io.LimitReader(file, maxManifestPackageBytes+1))
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to read %s", path)
 	}
 
 	if len(data) > maxManifestPackageBytes {
-		return nil, errors.Errorf("%s is %d bytes, larger than the %d byte limit for an app package", path, len(data), maxManifestPackageBytes)
+		return nil, errors.Errorf("%s is larger than the %d byte limit for an app package", path, maxManifestPackageBytes)
 	}
 
 	if isZip(data) {

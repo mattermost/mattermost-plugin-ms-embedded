@@ -122,7 +122,9 @@ func describeSignedInUser(ctx context.Context, client *msgraphsdk.GraphServiceCl
 	}
 	directory.UserPrincipalName = derefString(me.GetUserPrincipalName())
 
-	memberOf, err := client.Me().MemberOf().Get(ctx, nil)
+	// transitiveMemberOf, unlike memberOf, includes roles granted through a
+	// role-assignable group.
+	memberOf, err := client.Me().TransitiveMemberOf().Get(ctx, nil)
 	if err != nil {
 		directory.RolesErr = err
 		return directory, nil

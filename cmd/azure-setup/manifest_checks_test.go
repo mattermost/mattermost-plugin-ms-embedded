@@ -360,16 +360,6 @@ func TestManifestChecksAreAbsentWithoutAManifest(t *testing.T) {
 	}
 }
 
-func TestManifestChecksReportAnUnreadableFile(t *testing.T) {
-	in := healthyInputs(t)
-	in.ManifestErr = assert.AnError
-
-	checks := manifestChecks(in)
-	require.Len(t, checks, 1)
-	assert.Equal(t, StatusFail, checks[0].Status)
-	assert.Equal(t, CategoryManifest, checks[0].Category)
-}
-
 func TestManifestChecksOnAConsistentSetup(t *testing.T) {
 	in := healthyInputs(t)
 	in.App = appForRealManifest(t)
