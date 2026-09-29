@@ -84,9 +84,11 @@ func TestNotificationNavigateContract(t *testing.T) {
 	shell, err := fs.ReadFile(assets.Templates, "iframe.html.tmpl")
 	require.NoError(t, err)
 	shellStr := string(shell)
-	require.Contains(t, shellStr, "mattermost_notification_navigate")
 
-	handler := shellStr[strings.Index(shellStr, "mattermost_notification_navigate"):]
+	idx := strings.Index(shellStr, "mattermost_notification_navigate")
+	require.GreaterOrEqual(t, idx, 0, "shell must handle mattermost_notification_navigate")
+
+	handler := shellStr[idx:]
 	originIdx := strings.Index(handler, "isValidOrigin")
 	navigateIdx := strings.Index(handler, "navigateToApp")
 	require.GreaterOrEqual(t, originIdx, 0, "shell must origin-check navigate messages")
