@@ -269,10 +269,13 @@ func TestIframeNotificationPreview(t *testing.T) {
 		// Check for Report-To header
 		require.Contains(t, resp.Header.Get("Report-To"), `{"group":"csp-endpoint","max_age":10886400,"endpoints":[{"url":"/plugins/`+manifest.Id+`/csp-report"}]}`)
 
-		// Check response body contains expected HTML
+		// Check response body: HTML content, shell-delegated navigate, no Teams SDK
 		body, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
-		assert.Contains(t, string(body), "<html")
-		assert.Contains(t, string(body), post.Message)
+		bodyStr := string(body)
+		assert.Contains(t, bodyStr, "<html")
+		assert.Contains(t, bodyStr, post.Message)
+		assert.Contains(t, bodyStr, "mattermost_notification_navigate")
+		assert.NotContains(t, bodyStr, "teams-js/")
 	})
 }

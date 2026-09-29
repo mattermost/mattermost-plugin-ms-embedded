@@ -4,11 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script
-        src="https://res.cdn.office.net/teams-js/{{.TeamsJSVersion}}/js/MicrosoftTeams.min.js"
-        {{.TeamsJSIntegrityAttr}}
-        crossorigin="anonymous"
-    ></script>
-    <script
         src="https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js"
         integrity="sha384-QsSpx6a0USazT7nK7w8qXDgpSAPhFsb2XtpoLFQ5+X2yFN6hvCKnwEzN8M5FWaJb"
         crossorigin="anonymous"
@@ -199,50 +194,23 @@
 </head>
 <body>
     <script nonce="{{.Nonce}}">
-        let appID = "{{.TeamsAppID}}";
-
-        (function (microsoftTeams) {
-            // Resolves to a boolean and never rejects: a failed init must not leave a
-            // dangling rejection or permanently disable the button.
-            const teamsReady = (async () => {
-                try {
-                    await microsoftTeams.app.initialize(["{{.SiteURL}}"]);
-                } catch (error) {
-                    console.error('Failed to initialize Microsoft Teams SDK:', error);
-                    return false;
-                }
-
-                try {
-                    await microsoftTeams.app.notifySuccess();
-                } catch (error) {
-                    console.error('Failed to notify Microsoft Teams of load success:', error);
-                }
-
-                return true;
-            })();
-
-            function goToMattermost() {
-                teamsReady.then((ready) => {
-                    if (!ready) {
-                        return;
-                    }
-
-                    return microsoftTeams.pages.navigateToApp({
-                        appId: appID,
-                        pageId: 'Mattermost',
-                        subPageId: 'post_{{.Post.Id}}'
-                    });
-                }).catch((error) => {
-                    console.error('Failed to navigate to Mattermost:', error);
-                });
+        // Ask the Teams shell parent to navigate; teams-js cannot init in this nested iframe (2.36.0+).
+        function goToMattermost() {
+            if (window.parent === window) {
+                console.error('View in Mattermost requires the Teams shell parent frame');
+                return;
             }
+            window.parent.postMessage({
+                type: 'mattermost_notification_navigate',
+                subPageId: 'post_{{.Post.Id}}'
+            }, "{{.SiteURL}}");
+        }
 
-            window.onload = function() {
-                const messageContent = `{{.Post.Message}}`;
-                document.getElementById('message-content').innerHTML = marked.parse(messageContent);
-                document.getElementById('view-in-mattermost').addEventListener('click', goToMattermost);
-            };
-        })(window.microsoftTeams);
+        window.onload = function() {
+            const messageContent = `{{.Post.Message}}`;
+            document.getElementById('message-content').innerHTML = marked.parse(messageContent);
+            document.getElementById('view-in-mattermost').addEventListener('click', goToMattermost);
+        };
     </script>
 
     <div class="notification-container">

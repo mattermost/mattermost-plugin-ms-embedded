@@ -109,6 +109,32 @@
           console.log('Received message from Mattermost:', event.data);
           iframe.src = domainRoot;
         }
+
+        // Nested notification preview cannot init teams-js (2.36.0+); navigate on its behalf.
+        if (event.data.type === 'mattermost_notification_navigate') {
+          if (!isValidOrigin(event.origin, domainRoot)) {
+            console.error('Rejecting unknown origin: ' + event.origin);
+            return;
+          }
+          if (event.source !== iframe.contentWindow) {
+            console.error('Rejecting navigate message from unexpected frame');
+            return;
+          }
+          const subPageId = event.data.subPageId;
+          if (typeof subPageId !== 'string' || !/^post_[a-z0-9]+$/i.test(subPageId)) {
+            console.error('Rejecting invalid subPageId:', subPageId);
+            return;
+          }
+
+          microsoftTeams.pages.navigateToApp({
+            appId: '{{.TeamsAppID}}',
+            pageId: 'Mattermost',
+            subPageId,
+          }).catch((error) => {
+            console.error('Failed to navigate to Mattermost:', errorToString(error));
+            console.error(error);
+          });
+        }
       });
 
       function getAuthTokenWithRetries(maxRetries = 3) {

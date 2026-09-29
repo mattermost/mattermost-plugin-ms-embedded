@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"net/http"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -68,4 +69,32 @@ func TestTemplatesUseTeamsJSConstants(t *testing.T) {
 	}
 
 	require.NotZero(t, tags, "found no teams-js script tags to check")
+}
+
+func TestNotificationNavigateContract(t *testing.T) {
+	preview, err := fs.ReadFile(assets.Templates, "iframe_notification_preview.html.tmpl")
+	require.NoError(t, err)
+	previewStr := string(preview)
+
+	assert.Contains(t, previewStr, "mattermost_notification_navigate")
+	assert.Contains(t, previewStr, "window.parent.postMessage")
+	assert.NotContains(t, previewStr, "teams-js/")
+	assert.NotContains(t, previewStr, "app.initialize")
+
+	shell, err := fs.ReadFile(assets.Templates, "iframe.html.tmpl")
+	require.NoError(t, err)
+	shellStr := string(shell)
+	require.Contains(t, shellStr, "mattermost_notification_navigate")
+
+	handler := shellStr[strings.Index(shellStr, "mattermost_notification_navigate"):]
+	originIdx := strings.Index(handler, "isValidOrigin")
+	navigateIdx := strings.Index(handler, "navigateToApp")
+	require.GreaterOrEqual(t, originIdx, 0, "shell must origin-check navigate messages")
+	require.GreaterOrEqual(t, navigateIdx, 0, "shell must call navigateToApp")
+	assert.Less(t, originIdx, navigateIdx, "origin check must run before navigateToApp")
+
+	assert.Contains(t, handler, "event.source !== iframe.contentWindow")
+	assert.Contains(t, handler, "pageId: 'Mattermost'")
+	assert.Contains(t, handler, "appId: '{{.TeamsAppID}}'")
+	assert.NotContains(t, handler, "event.data.appId")
 }
