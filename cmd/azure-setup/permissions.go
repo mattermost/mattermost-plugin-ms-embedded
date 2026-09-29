@@ -17,14 +17,7 @@ import (
 )
 
 // resolvePermissions returns every Graph permission this run will request: the
-// ones the plugin needs, plus the read-only ones the doctor needs when
-// --create-doctor-requirements was given.
-//
-// It is called before the pre-flight confirmation rather than inside
-// configureAPIPermissions so that the list the operator approves is the same
-// list that gets requested. The doctor permissions are the two the README
-// warns about - they grant the plugin's own client secret tenant-wide
-// directory read - so they are the last thing a consent prompt should omit.
+// ones the plugin needs, plus the doctor's when --create-doctor-requirements was given.
 func resolvePermissions(ctx context.Context, client *msgraphsdk.GraphServiceClient, config *SetupConfig) ([]requiredPermission, error) {
 	permissions := getRequiredPermissions()
 
@@ -95,8 +88,6 @@ func configureAPIPermissions(ctx context.Context, client *msgraphsdk.GraphServic
 
 // resolveGraphAppRoles looks up Microsoft Graph application permissions by name
 // on the Graph service principal and returns them as requiredPermission entries.
-// Resolving at runtime keeps the role IDs out of the source: a name Graph does
-// not recognize fails with a readable error instead of a rejected PATCH.
 func resolveGraphAppRoles(ctx context.Context, client *msgraphsdk.GraphServiceClient, names []string) ([]requiredPermission, error) {
 	graphSP, err := findGraphServicePrincipal(ctx, client)
 	if err != nil {
@@ -168,19 +159,14 @@ func buildRequiredResourceAccess(permissions []requiredPermission) ([]models.Req
 }
 
 // mergeExistingResourceAccess carries over any permission already on the
-// application that is not in the desired set.
-//
-// A PATCH replaces requiredResourceAccess wholesale, so without this a re-run
-// would silently strip permissions this invocation does not know about: the
-// doctor permissions added by an earlier --create-doctor-requirements run, or
-// anything an administrator added by hand.
+// application that is not in the desired set, because a PATCH replaces
+// requiredResourceAccess wholesale.
 func mergeExistingResourceAccess(desired []models.RequiredResourceAccessable, app models.Applicationable) []models.RequiredResourceAccessable {
 	if app == nil || len(app.GetRequiredResourceAccess()) == 0 {
 		return desired
 	}
 
-	// The desired entries are copied rather than extended in place: callers
-	// build them from a shared permission list and must not see them grow.
+	// Copied so the caller's desired entries are not extended in place.
 	groups := make(map[string]models.RequiredResourceAccessable, len(desired))
 	present := make(map[string]bool)
 	merged := make([]models.RequiredResourceAccessable, 0, len(desired)+1)
@@ -227,10 +213,7 @@ func mergeExistingResourceAccess(desired []models.RequiredResourceAccessable, ap
 }
 
 // resourceAccessKey identifies one permission on one resource. Every component
-// is folded: Graph preserves whatever casing another tool or a hand-edited
-// manifest wrote, so a "scope" that does not match our "Scope" would look like
-// a different permission, get appended a second time by
-// mergeExistingResourceAccess, and have the PATCH rejected as a duplicate.
+// is case-folded, since Graph rejects a PATCH that repeats one in another case.
 func resourceAccessKey(resourceAppID string, access models.ResourceAccessable) string {
 	return strings.ToLower(resourceAppID) + "|" +
 		strings.ToLower(uuidString(access.GetId())) + "|" +

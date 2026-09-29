@@ -95,12 +95,8 @@ type DoctorReport struct {
 	ApplicationIDURI    string `json:"application_id_uri,omitempty"`
 	MattermostSiteURL   string `json:"mattermost_site_url,omitempty"`
 
-	// ManifestHost is the host the manifest claims to serve the tab from, shown
-	// when no --site-url was given. It is context only: it is never used to
-	// derive the expected Application ID URI, which would be circular.
+	// ManifestHost is shown when no --site-url was given.
 	ManifestHost string `json:"manifest_host,omitempty"`
-
-	// ManifestPath is the app package or manifest.json that was cross-checked.
 	ManifestPath string `json:"manifest_path,omitempty"`
 	PortalHost   string `json:"portal_host,omitempty"`
 
@@ -140,9 +136,7 @@ func (r *DoctorReport) Finalize() {
 		}
 	}
 
-	// A skipped check is an unverified check. Leaving the verdict at "pass"
-	// would let an incomplete run - a credential that cannot read the consent
-	// grants, say - report a clean bill of health and exit 0 in CI.
+	// A skipped check is unverified, so it cannot leave the verdict at pass.
 	switch {
 	case summary.Failed > 0:
 		summary.Status = StatusFail
@@ -184,9 +178,7 @@ func (r *DoctorReport) actionItems() []CheckResult {
 	return items
 }
 
-// normalizeReportFormat validates a doctor report format and returns its
-// canonical name. It is called before the doctor touches Azure so an unusable
-// format fails immediately rather than after a login and a full inspection.
+// normalizeReportFormat validates a doctor report format and returns its canonical name.
 func normalizeReportFormat(format string) (string, error) {
 	switch normalized := strings.ToLower(strings.TrimSpace(format)); normalized {
 	case "human", "":
@@ -379,9 +371,7 @@ func reportHeaderFields(report *DoctorReport) [][2]string {
 	return fields
 }
 
-// escapeMarkdownCell keeps a value from breaking the table layout. Pipes are
-// escaped, and all whitespace is collapsed because a newline terminates the row
-// outright - Graph OData errors, which end up in skip summaries, carry them.
+// escapeMarkdownCell escapes pipes and collapses whitespace, since a newline ends the row.
 func escapeMarkdownCell(value string) string {
 	return strings.ReplaceAll(strings.Join(strings.Fields(value), " "), "|", "\\|")
 }

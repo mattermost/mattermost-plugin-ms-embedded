@@ -6,7 +6,6 @@ package main
 import (
 	"archive/zip"
 	"bytes"
-	"encoding/binary"
 	"encoding/json"
 	"io"
 	"os"
@@ -18,16 +17,10 @@ import (
 // ManifestName is the file Microsoft Teams requires at the root of an app package.
 const ManifestName = "manifest.json"
 
-// maxManifestPackageBytes caps what is read out of an app package. A real
-// package is a manifest and two icons - tens of kilobytes - so anything near
-// this is either not an app package or is not worth decompressing.
+// maxManifestPackageBytes caps what is read out of an app package; a real one is tens of kilobytes.
 const maxManifestPackageBytes = 8 << 20
 
 // teamsManifest models only the manifest fields the doctor checks.
-//
-// It deliberately does not use DisallowUnknownFields: a real manifest carries
-// dozens of properties this tool has no opinion on, and rejecting them would
-// fail every valid input. This is a validator, not a round-tripper.
 type teamsManifest struct {
 	Schema          string `json:"$schema"`
 	ManifestVersion string `json:"manifestVersion"`
@@ -60,12 +53,9 @@ type teamsManifest struct {
 		} `json:"permissions"`
 	} `json:"authorization"`
 
-	// SourcePath is the file the manifest was read from, for the report header.
 	SourcePath string `json:"-"`
 
-	// FromPackage records that the source was a zip app package rather than a
-	// bare manifest.json. The package completeness and icon checks only apply
-	// to a package, because only then are the icons available to inspect.
+	// FromPackage records that the source was a zip app package rather than a bare manifest.json.
 	FromPackage bool `json:"-"`
 
 	// packageFiles holds the package entries by name. Nil for a bare manifest.
@@ -73,14 +63,8 @@ type teamsManifest struct {
 }
 
 // loadManifest reads a Teams app manifest from either the .zip app package the
-// plugin serves or a bare manifest.json.
-//
-// Operators download the zip from the plugin's settings page, so requiring them
-// to unpack it first would be friction for no reason. The format is detected
-// from the file header rather than the extension, because a downloaded package
-// is routinely renamed.
+// plugin serves or a bare manifest.json, detected by content since downloads get renamed.
 func loadManifest(path string) (*teamsManifest, error) {
-	// The path comes from the operator's own --manifest flag.
 	data, err := os.ReadFile(path) // #nosec G304
 	if err != nil {
 		return nil, errors.Wrapf(err, "failed to read %s", path)
@@ -118,8 +102,7 @@ func loadManifestPackage(path string, data []byte) (*teamsManifest, error) {
 
 	files := make(map[string][]byte, len(reader.File))
 
-	// Capping each entry individually still lets a package with many entries
-	// expand without bound, so the running total is what is actually enforced.
+	// The limit applies to the running total, not per entry.
 	var total int
 
 	for _, entry := range reader.File {
@@ -166,8 +149,7 @@ func readZipEntry(entry *zip.File, remaining int) ([]byte, error) {
 	}
 	defer func() { _ = rc.Close() }()
 
-	// Bound the read rather than trusting the declared uncompressed size, so a
-	// package that inflates far beyond its download size cannot exhaust memory.
+	// Don't trust the declared uncompressed size.
 	contents, err := io.ReadAll(io.LimitReader(rc, int64(remaining)+1))
 	if err != nil {
 		return nil, err
@@ -225,22 +207,4 @@ func schemaVersion(schemaURL string) string {
 	}
 
 	return ""
-}
-
-// pngDimensions reads the width and height out of a PNG IHDR chunk, which
-// always sits at a fixed offset directly after the 8 byte signature.
-func pngDimensions(data []byte) (width, height int, ok bool) {
-	const (
-		signature  = "\x89PNG\r\n\x1a\n"
-		ihdrOffset = 16
-		headerSize = ihdrOffset + 8
-	)
-
-	if len(data) < headerSize || !bytes.HasPrefix(data, []byte(signature)) {
-		return 0, 0, false
-	}
-
-	return int(binary.BigEndian.Uint32(data[ihdrOffset : ihdrOffset+4])),
-		int(binary.BigEndian.Uint32(data[ihdrOffset+4 : ihdrOffset+8])),
-		true
 }

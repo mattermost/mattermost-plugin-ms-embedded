@@ -4,7 +4,9 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"image/png"
 	"net/url"
 	"slices"
 	"strings"
@@ -13,30 +15,21 @@ import (
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
 )
 
-// Manifest expectations. TeamsActivity.Send.User is the resource-specific
-// consent (RSC) permission the plugin declares so it can post to the activity
-// feed; Microsoft documents RSC as the least-privileged alternative to the
-// tenant-wide TeamsActivity.Send application permission, not as a companion to
-// it, so its absence warns rather than fails.
+// Manifest expectations. The RSC permission is an alternative to the tenant-wide
+// TeamsActivity.Send, so its absence warns rather than fails.
 const (
 	ManifestActivityPermission = "TeamsActivity.Send.User"
 	ManifestPermissionTypeApp  = "Application"
 
-	// IconColorSize and IconOutlineSize are the dimensions Microsoft requires
-	// for the two mandatory package icons.
 	IconColorSize   = 192
 	IconOutlineSize = 32
 
-	// MaxValidDomains is the limit in the v1.22 schema the plugin's template
-	// pins. Later schema versions raise it to 100.
+	// MaxValidDomains is the v1.22 schema limit the plugin's template pins.
 	MaxValidDomains = 16
 )
 
 // checkManifestAudience compares the manifest's webApplicationInfo.resource
-// against the registration's Application ID URI. Microsoft's guidance is to
-// copy this value out of "Expose an API", so the two are the same string: if
-// they diverge, the token Teams requests names an audience the registration
-// does not answer for and single sign-on fails.
+// against the registration's Application ID URI; if they diverge SSO fails.
 func checkManifestAudience(manifest *teamsManifest, app models.Applicationable) CheckResult {
 	result := CheckResult{Category: CategoryManifest, Name: "SSO audience (webApplicationInfo.resource)"}
 
@@ -71,10 +64,7 @@ func checkManifestAudience(manifest *teamsManifest, app models.Applicationable) 
 		return result
 	}
 
-	// A difference of case alone is called out separately. Microsoft documents
-	// no case-sensitivity rule for this comparison - only "use lowercase
-	// letters for the domain name" - so this is reported as a risk rather than
-	// as a definite break.
+	// Microsoft documents no case-sensitivity rule here, so a case-only difference is a risk, not a break.
 	for _, uri := range uris {
 		if strings.EqualFold(uri, declared) {
 			result.Status = StatusWarn
@@ -95,19 +85,10 @@ func checkManifestAudience(manifest *teamsManifest, app models.Applicationable) 
 }
 
 // manifestPathDepthNote flags an identifier URI with more than one path
-// segment. Microsoft documents only api://<fqdn>/<app-id>, and Entra's own
-// pattern guidance allows a single segment, so a Mattermost server behind a
-// subpath produces a shape that is unsupported by omission rather than
-// explicitly permitted.
+// segment, which Microsoft leaves undocumented for Teams SSO.
 func manifestPathDepthNote(resource string) *CheckResult {
-	const scheme = "api://"
-
-	if !strings.HasPrefix(strings.ToLower(resource), scheme) {
-		return nil
-	}
-
-	_, rest, hasPath := strings.Cut(resource[len(scheme):], "/")
-	if !hasPath || strings.Count(rest, "/") == 0 {
+	uri, ok := parseAPIURI(resource)
+	if !ok || strings.Count(uri.Path, "/") < 2 {
 		return nil
 	}
 
@@ -161,11 +142,8 @@ func checkManifestClientID(manifest *teamsManifest, app models.Applicationable) 
 	return result
 }
 
-// checkManifestAppID validates the Teams app identity.
-//
-// This is deliberately not compared against the client ID: Microsoft documents
-// no relationship between the two, and its own tab SSO sample reuses one GUID
-// for both, so requiring them to differ would flag a valid manifest.
+// checkManifestAppID validates the Teams app identity. It is not compared with
+// the client ID: Microsoft's own SSO sample reuses one GUID for both.
 func checkManifestAppID(manifest *teamsManifest) CheckResult {
 	result := CheckResult{Category: CategoryManifest, Name: "Teams app ID"}
 
@@ -219,8 +197,6 @@ func checkManifestValidDomains(manifest *teamsManifest) CheckResult {
 
 	var problems []string
 
-	// Store validation requires bare domains: "External domains declared for
-	// your submission must not contain URLs."
 	for _, domain := range manifest.ValidDomains {
 		if strings.Contains(domain, "://") || strings.Contains(domain, "/") {
 			problems = append(problems, fmt.Sprintf("%q is a URL, not a bare domain", domain))
@@ -260,7 +236,7 @@ func checkManifestContentURLs(manifest *teamsManifest) CheckResult {
 	var failures, warnings []string
 
 	for _, tab := range manifest.StaticTabs {
-		// contentUrl is optional - the "about" tab legitimately has none.
+		// The "about" tab has no contentUrl.
 		if tab.ContentURL == "" {
 			continue
 		}
@@ -282,9 +258,7 @@ func checkManifestContentURLs(manifest *teamsManifest) CheckResult {
 			failures = append(failures, fmt.Sprintf("%s: does not point at /plugins/%s/", tab.EntityID, PluginID))
 		}
 
-		// The schema regex makes the "s" optional and later versions allow
-		// plain http, so this is a warning rather than a failure even though
-		// Teams will not embed insecure content in practice.
+		// The schema allows plain http, so this only warns.
 		if !strings.EqualFold(parsed.Scheme, "https") {
 			warnings = append(warnings, fmt.Sprintf("%s: %s is not https", tab.EntityID, parsed.Scheme))
 		}
@@ -372,10 +346,7 @@ func checkManifestVersion(manifest *teamsManifest) CheckResult {
 	return result
 }
 
-// checkManifestPackage verifies the app package carries the icons the manifest
-// names. Teams rejects a package whose declared icons are absent, and the
-// filenames are developer-chosen rather than fixed, so the paths come from the
-// manifest rather than being hardcoded.
+// checkManifestPackage verifies the app package carries the icons the manifest names.
 func checkManifestPackage(manifest *teamsManifest) CheckResult {
 	result := CheckResult{Category: CategoryManifest, Name: "App package contents"}
 
@@ -402,11 +373,12 @@ func checkManifestPackage(manifest *teamsManifest) CheckResult {
 			continue
 		}
 
-		width, height, valid := pngDimensions(contents)
-		if !valid {
+		config, err := png.DecodeConfig(bytes.NewReader(contents))
+		if err != nil {
 			warnings = append(warnings, icon.name+" is not a readable PNG")
 			continue
 		}
+		width, height := config.Width, config.Height
 
 		result.Details = append(result.Details, fmt.Sprintf("%s: %s (%dx%d)", icon.field, icon.name, width, height))
 
@@ -434,10 +406,7 @@ func checkManifestPackage(manifest *teamsManifest) CheckResult {
 }
 
 // domainAllowed reports whether host is covered by the validDomains patterns.
-//
-// Teams permits wildcards, so a literal comparison would reject a manifest that
-// legitimately declares "*.example.com". Per Microsoft's rules a wildcard must
-// be the whole of its segment, and it matches exactly one segment.
+// A "*" wildcard matches exactly one whole segment.
 func domainAllowed(patterns []string, host string) bool {
 	for _, pattern := range patterns {
 		if domainPatternMatches(pattern, host) {
@@ -449,9 +418,7 @@ func domainAllowed(patterns []string, host string) bool {
 }
 
 func domainPatternMatches(pattern, host string) bool {
-	// The plugin derives validDomains from url.Host, which carries the port for
-	// a server not on 443, while a tab URL host may or may not. Comparing
-	// without the port makes the two agree either way.
+	// validDomains may carry a port the tab URL host does not.
 	pattern = stripPort(pattern)
 	host = stripPort(host)
 
@@ -491,14 +458,10 @@ func stripPort(host string) string {
 // manifestResourceHost returns the host the tab is served from, taken from the
 // identifier URI so it reflects what the manifest itself claims.
 func manifestResourceHost(manifest *teamsManifest) string {
-	const scheme = "api://"
-
-	resource := manifest.WebApplicationInfo.Resource
-	if !strings.HasPrefix(strings.ToLower(resource), scheme) {
+	uri, ok := parseAPIURI(manifest.WebApplicationInfo.Resource)
+	if !ok {
 		return ""
 	}
 
-	host, _, _ := strings.Cut(resource[len(scheme):], "/")
-
-	return host
+	return uri.Host
 }

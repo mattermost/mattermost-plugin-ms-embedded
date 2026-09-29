@@ -52,17 +52,9 @@ const (
 	ClientIDOfficeUniversal = "ea5a67f6-b6f3-4338-b240-c655ddc3cc8e"
 )
 
-// doctorRequirementNames are the Microsoft Graph application permissions that
-// `azure-setup doctor` needs in order to read an application's configuration,
-// its service principal, and the consent grants in the tenant.
-//
-// They are deliberately NOT part of getRequiredPermissions(): the plugin itself
-// never uses them and the doctor audits only the permissions the plugin needs.
-// They are added solely by `create --create-doctor-requirements`.
-//
-// The names are resolved to role IDs at runtime from the Microsoft Graph service
-// principal instead of being hardcoded here, so a renamed or re-issued role
-// surfaces as a clear error rather than an opaque Graph rejection.
+// doctorRequirementNames are the Graph application permissions `azure-setup
+// doctor` needs. The plugin never uses them, so they are only requested by
+// `create --create-doctor-requirements`.
 var doctorRequirementNames = []string{
 	"Application.Read.All",
 	"Directory.Read.All",
@@ -136,9 +128,7 @@ type SetupResult struct {
 	Created bool // true if created new, false if updated existing
 	DryRun  bool
 
-	// DoctorRequirements records that --create-doctor-requirements was used, so
-	// the output can point out that admin consent covers those permissions too.
-	DoctorRequirements bool
+	DoctorRequirements bool // --create-doctor-requirements was used
 }
 
 // requiredPermission represents a Graph API permission that needs to be configured

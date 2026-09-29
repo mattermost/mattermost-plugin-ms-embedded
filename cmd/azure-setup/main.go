@@ -44,10 +44,7 @@ The tool requires an authenticated Azure account with permissions to manage
 applications in your Azure AD tenant.`,
 	Version: version,
 
-	// main already prints the error, so cobra must not print it a second time.
-	// Usage is deliberately left enabled here: a missing or misspelled flag is a
-	// usage mistake and the flag list helps. Commands that can fail for
-	// non-usage reasons silence it themselves once their flags have parsed.
+	// main prints the error. Usage stays on for flag mistakes; commands silence it in RunE.
 	SilenceErrors: true,
 }
 
@@ -176,8 +173,6 @@ func init() {
 
 // runCreate executes the create command
 func runCreate(cmd *cobra.Command, args []string) error {
-	// Flags have parsed by the time RunE is reached, so a failure from here on
-	// is an Azure or configuration error rather than a usage mistake.
 	cmd.SilenceUsage = true
 
 	// Set a reasonable timeout for the entire operation
@@ -239,9 +234,7 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "failed to check for existing application")
 	}
 
-	// Resolve the permission set once, before the operator is asked to approve
-	// it, so the confirmation cannot list something different from what gets
-	// requested.
+	// Resolved before confirmation so the operator approves exactly what gets requested.
 	permissions, err := resolvePermissions(ctx, client, config)
 	if err != nil {
 		return err
@@ -269,7 +262,6 @@ func runCreate(cmd *cobra.Command, args []string) error {
 
 // runValidate executes the validate command
 func runValidate(cmd *cobra.Command, args []string) error {
-	// See runCreate: past flag parsing, a failure is not a usage mistake.
 	cmd.SilenceUsage = true
 
 	// Set a reasonable timeout for validation

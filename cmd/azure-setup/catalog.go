@@ -32,16 +32,9 @@ type catalogApp struct {
 	MatchedByCatalogID bool
 }
 
-// findCatalogApp locates the Teams app corresponding to a manifest id in the
-// tenant's app catalog. This is the lookup the plugin itself performs before
-// sending an activity notification, so a miss here means notifications cannot
-// work regardless of how the Azure registration is configured.
-//
-// Two lookups are needed. Graph documents externalId as "the ID of the catalog
-// provided by the app developer in the Microsoft Teams zip app package", but
-// also that it "is empty for apps with a distributionMethod type of store", in
-// which case the catalog id itself matches the manifest id. Filtering on
-// externalId alone therefore misses every store-distributed install.
+// findCatalogApp locates the Teams app for a manifest id in the tenant's app
+// catalog, the same lookup the plugin performs before sending a notification.
+// Store-distributed apps have an empty externalId and match on the catalog id instead.
 func findCatalogApp(ctx context.Context, client *msgraphsdk.GraphServiceClient, manifestID string) (*catalogApp, error) {
 	app, err := queryCatalog(ctx, client, fmt.Sprintf("externalId eq '%s'", escapeODataString(manifestID)))
 	if err != nil {
@@ -77,21 +70,11 @@ func queryCatalog(ctx context.Context, client *msgraphsdk.GraphServiceClient, fi
 		return nil, err
 	}
 
-	var found *catalogApp
-
-	err = iteratePages(ctx, client, response,
-		models.CreateTeamsAppCollectionResponseFromDiscriminatorValue,
-		func(app models.TeamsAppable) {
-			if found != nil {
-				return
-			}
-			found = describeCatalogApp(app)
-		})
-	if err != nil {
-		return nil, err
+	if response == nil || len(response.GetValue()) == 0 {
+		return nil, nil
 	}
 
-	return found, nil
+	return describeCatalogApp(response.GetValue()[0]), nil
 }
 
 func describeCatalogApp(app models.TeamsAppable) *catalogApp {
@@ -105,8 +88,7 @@ func describeCatalogApp(app models.TeamsAppable) *catalogApp {
 		described.DistributionMethod = method.String()
 	}
 
-	// Graph documents no ordering for appDefinitions, so the newest is chosen
-	// by comparing versions rather than by taking the last element.
+	// Graph documents no ordering for appDefinitions.
 	if newest := newestDefinition(app.GetAppDefinitions()); newest != nil {
 		described.Version = derefString(newest.GetVersion())
 

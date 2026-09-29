@@ -8,13 +8,8 @@ import (
 	"os"
 )
 
-// Progress, prompts, and warnings go to stderr so that stdout carries only the
-// command's actual output: a JSON or Markdown doctor report, the env exports,
-// or the Mattermost config fragment. Without this, `doctor -o json -v` puts
-// "Authenticating to Azure..." ahead of the document and breaks any consumer
-// piping it into jq.
-//
-// Only the renderers in output.go and doctor_report.go write to stdout.
+// Progress, prompts, and warnings go to stderr so stdout carries only the
+// command's machine-readable output.
 
 func progress(args ...any) {
 	fmt.Fprint(os.Stderr, args...)

@@ -6,10 +6,10 @@ package main
 import (
 	"archive/zip"
 	"bytes"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"hash/crc32"
+	"image"
+	"image/png"
 	"maps"
 	"os"
 	"path/filepath"
@@ -76,24 +76,9 @@ func writeManifestFile(t *testing.T, raw map[string]any) *teamsManifest {
 	return manifest
 }
 
-// pngOfSize builds a minimal PNG whose IHDR declares the given dimensions.
-// Only the signature and IHDR are needed; nothing decodes the image data.
 func pngOfSize(width, height int) []byte {
 	var buf bytes.Buffer
-
-	buf.WriteString("\x89PNG\r\n\x1a\n")
-
-	ihdr := make([]byte, 0, 25)
-	ihdr = binary.BigEndian.AppendUint32(ihdr, 13)
-	ihdr = append(ihdr, []byte("IHDR")...)
-	// #nosec G115 -- dimensions are small constants chosen by the tests
-	ihdr = binary.BigEndian.AppendUint32(ihdr, uint32(width))
-	// #nosec G115 -- as above
-	ihdr = binary.BigEndian.AppendUint32(ihdr, uint32(height))
-	ihdr = append(ihdr, 8, 6, 0, 0, 0)
-	ihdr = binary.BigEndian.AppendUint32(ihdr, crc32.ChecksumIEEE(ihdr[4:]))
-
-	buf.Write(ihdr)
+	_ = png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, width, height)))
 
 	return buf.Bytes()
 }
@@ -208,19 +193,6 @@ func TestSchemaVersion(t *testing.T) {
 	assert.Equal(t, "1.30", schemaVersion("https://example.com/teams/v1.30/x.json"))
 	assert.Empty(t, schemaVersion("https://example.com/teams/schema.json"))
 	assert.Empty(t, schemaVersion(""))
-}
-
-func TestPNGDimensions(t *testing.T) {
-	width, height, ok := pngDimensions(pngOfSize(192, 32))
-	require.True(t, ok)
-	assert.Equal(t, 192, width)
-	assert.Equal(t, 32, height)
-
-	_, _, ok = pngDimensions([]byte("not a png"))
-	assert.False(t, ok)
-
-	_, _, ok = pngDimensions(nil)
-	assert.False(t, ok)
 }
 
 func TestLoadManifestRejectsAnOversizedPackage(t *testing.T) {

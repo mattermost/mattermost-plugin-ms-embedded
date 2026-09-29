@@ -177,9 +177,53 @@ func TestCheckSignInAudience(t *testing.T) {
 			app := healthyApp(t)
 			app.SetSignInAudience(test.audience)
 
-			assert.Equal(t, test.expected, checkSignInAudience(app).Status)
+			assert.Equal(t, test.expected, checkSignInAudience(app, nil, nil).Status)
 		})
 	}
+
+	multiTenant := healthyApp(t)
+	multiTenant.SetSignInAudience(ptr(AudienceMultipleOrgs))
+	otherTenant := "cccccccc-0000-0000-0000-000000000001"
+
+	t.Run("multi tenant restricted to listed tenants", func(t *testing.T) {
+		result := checkSignInAudience(multiTenant, &tenantRestriction{Restricted: true, AllowedTenantIDs: []string{otherTenant}}, nil)
+		assert.Equal(t, StatusWarn, result.Status)
+		assert.Contains(t, result.Summary, "restricted to 1 allowed tenant")
+		assert.Contains(t, result.Details, "allowed tenant: "+otherTenant)
+	})
+
+	t.Run("multi tenant with no restriction", func(t *testing.T) {
+		result := checkSignInAudience(multiTenant, &tenantRestriction{}, nil)
+		assert.Equal(t, StatusWarn, result.Status)
+		assert.Contains(t, result.Summary, "any Microsoft Entra tenant")
+	})
+
+	t.Run("multi tenant restriction unreadable", func(t *testing.T) {
+		result := checkSignInAudience(multiTenant, nil, errors.New("beta unavailable"))
+		assert.Equal(t, StatusWarn, result.Status)
+		assert.Contains(t, result.Summary, "could not be read")
+	})
+}
+
+func TestParseTenantRestriction(t *testing.T) {
+	restricted, err := parseTenantRestriction([]byte(`{"signInAudienceRestrictions":{
+		"@odata.type":"#microsoft.graph.allowedTenantsAudience","kind":"allowedTenants",
+		"allowedTenantIds":["a","b"],"isHomeTenantAllowed":true}}`))
+	require.NoError(t, err)
+	assert.True(t, restricted.Restricted)
+	assert.Equal(t, []string{"a", "b"}, restricted.AllowedTenantIDs)
+
+	unrestricted, err := parseTenantRestriction([]byte(`{"signInAudienceRestrictions":{
+		"@odata.type":"#microsoft.graph.unrestrictedAudience","kind":"unrestricted"}}`))
+	require.NoError(t, err)
+	assert.False(t, unrestricted.Restricted)
+
+	absent, err := parseTenantRestriction([]byte(`{}`))
+	require.NoError(t, err)
+	assert.False(t, absent.Restricted)
+
+	_, err = parseTenantRestriction(nil)
+	require.Error(t, err)
 }
 
 func TestCheckApplicationIDURI(t *testing.T) {
@@ -492,8 +536,6 @@ func TestCheckClientSecrets(t *testing.T) {
 	})
 
 	t.Run("a zero window suppresses the expiry warning", func(t *testing.T) {
-		// The flag defaults to DefaultSecretWarningDays, so a zero reaching the
-		// checks can only be an operator explicitly opting out.
 		app := healthyApp(t)
 		app.SetPasswordCredentials([]models.PasswordCredentialable{
 			passwordCredential("expiring tomorrow", now.AddDate(0, 0, 1)),
@@ -505,20 +547,6 @@ func TestCheckClientSecrets(t *testing.T) {
 		in.SecretWarningDays = 0
 
 		assert.Equal(t, StatusPass, statusOfCheck(t, runDoctorChecks(in), "Client secrets"))
-	})
-
-	t.Run("a negative window falls back to the default", func(t *testing.T) {
-		app := healthyApp(t)
-		app.SetPasswordCredentials([]models.PasswordCredentialable{
-			passwordCredential("expiring tomorrow", now.AddDate(0, 0, 1)),
-		})
-
-		in := healthyInputs(t)
-		in.App = app
-		in.Now = now
-		in.SecretWarningDays = -1
-
-		assert.Equal(t, StatusWarn, statusOfCheck(t, runDoctorChecks(in), "Client secrets"))
 	})
 
 	t.Run("only secret expires soon", func(t *testing.T) {

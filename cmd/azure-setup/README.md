@@ -272,7 +272,7 @@ depends on is configured correctly. The doctor is read-only: it never changes Az
 | Category | Checks |
 |----------|--------|
 | Identity & access | Sign-in succeeds, the signed-in user holds an application administration role, tenant is resolved |
-| Application registration | The application exists, is single tenant, and its Application ID URI matches the Mattermost site URL |
+| Application registration | The application exists, is single tenant (a multi-tenant app warns and lists the tenants it is restricted to, read from the Graph beta endpoint), and its Application ID URI matches the Mattermost site URL |
 | Exposed API | The `access_as_user` scope is exposed, enabled, user-consentable, and fully described; every Microsoft first-party client (Teams, Outlook, Office, Copilot) is pre-authorized for it |
 | API permissions | `User.Read`, `TeamsActivity.Send`, and `AppCatalog.Read.All` are requested with the correct type. Any other permission — including the doctor's own `Application.Read.All` / `Directory.Read.All` — is listed but never affects the status; names are resolved from the Microsoft Graph service principal, falling back to the raw permission ID when a name cannot be resolved |
 | Admin consent | A service principal exists and is enabled, and each application permission has been consented tenant-wide. Delegated permissions are reported but only warn: the plugin authenticates app-only, so an unconsented delegated permission does not block it |
@@ -382,6 +382,10 @@ export AZURE_TENANT_ID="your-tenant-id"
 export AZURE_CLIENT_ID="your-client-id"
 export AZURE_CLIENT_SECRET="your-client-secret"
 ```
+
+A service principal has no signed-in user, so `create` and `validate` cannot check
+directory roles and only warn. To create and update applications it needs the
+`Application.ReadWrite.All` application permission with admin consent.
 
 ### 2. Azure CLI
 

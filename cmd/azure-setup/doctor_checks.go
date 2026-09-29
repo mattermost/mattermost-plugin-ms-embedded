@@ -4,7 +4,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -23,31 +25,21 @@ const DefaultSecretWarningDays = 30
 var errNoServicePrincipal = errors.New("the application has no service principal")
 
 // consentState holds the admin consent grants read from the application's
-// service principal. The delegated grants and the application role assignments
-// are read independently, so each carries its own error: failing to read one
-// must not hide the other.
+// service principal. Delegated grants and app role assignments are read
+// independently, so each carries its own error.
 type consentState struct {
-	// DelegatedErr records why the delegated grants could not be read, and is
-	// nil once they have been read successfully.
 	DelegatedErr error
 
-	// TenantWideScopes are delegated scopes consented for every user in the
-	// tenant (an AllPrincipals grant). Only these remove the consent prompt.
+	// TenantWideScopes come from AllPrincipals grants; only these remove the consent prompt.
 	TenantWideScopes []string
+	UserScopes       []string
 
-	// UserScopes are delegated scopes consented for individual users only.
-	UserScopes []string
-
-	// AppRoleErr records why the application role assignments could not be
-	// read, and is nil once they have been read successfully.
 	AppRoleErr error
-
 	AppRoleIDs []string
 }
 
-// doctorInputs is everything the doctor reads from Microsoft Graph. Keeping the
-// checks as pure functions over this struct means every rule is unit testable
-// without a live tenant.
+// doctorInputs is everything the doctor reads from Microsoft Graph, so the
+// checks stay pure functions over it.
 type doctorInputs struct {
 	App        models.Applicationable
 	SiteURL    string
@@ -56,8 +48,10 @@ type doctorInputs struct {
 
 	SecretWarningDays int
 
-	// GraphPermissionNames maps Microsoft Graph permission IDs to their names so
-	// permissions the plugin does not require can still be reported by name.
+	// TenantRestriction is read only for AzureADMultipleOrgs applications.
+	TenantRestriction    *tenantRestriction
+	TenantRestrictionErr error
+
 	GraphPermissionNames map[string]string
 
 	ServicePrincipal    models.ServicePrincipalable
@@ -68,19 +62,15 @@ type doctorInputs struct {
 	Owners    []string
 	OwnersErr error
 
-	// DuplicateClientIDs lists other applications in the tenant that share the
-	// display name of the application under inspection.
+	// DuplicateClientIDs lists other applications sharing the display name.
 	DuplicateClientIDs []string
 	DuplicatesErr      error
 
-	// Manifest is the Teams app manifest to cross-check against the
-	// registration, set only when --manifest was given. ManifestErr records why
-	// it could not be read.
+	// Manifest is set only when --manifest was given.
 	Manifest    *teamsManifest
 	ManifestErr error
 
-	// CatalogApp is the app published to the tenant's Teams catalog that
-	// corresponds to the manifest, or nil when none matched.
+	// CatalogApp is nil when no published app matched the manifest.
 	CatalogApp    *catalogApp
 	CatalogErr    error
 	CatalogLookup bool
@@ -89,14 +79,8 @@ type doctorInputs struct {
 // runDoctorChecks evaluates every configuration rule against the data gathered
 // from Azure and returns the results in report order.
 func runDoctorChecks(in doctorInputs) []CheckResult {
-	// Zero is a deliberate request to suppress expiry warnings and is honoured;
-	// only a negative window is meaningless and falls back to the default.
-	if in.SecretWarningDays < 0 {
-		in.SecretWarningDays = DefaultSecretWarningDays
-	}
-
 	checks := []CheckResult{
-		checkSignInAudience(in.App),
+		checkSignInAudience(in.App, in.TenantRestriction, in.TenantRestrictionErr),
 		checkApplicationIDURI(in.App, in.SiteURL),
 		checkExposedScope(in.App),
 		checkPreAuthorizedClients(in.App),
@@ -114,9 +98,7 @@ func runDoctorChecks(in doctorInputs) []CheckResult {
 }
 
 // manifestChecks cross-checks the Teams app manifest against the registration.
-// It returns nothing at all when --manifest was not given: the manifest is
-// optional, and emitting skips for it would downgrade every run that does not
-// use it.
+// It returns nothing when --manifest was not given, so the verdict is not downgraded.
 func manifestChecks(in doctorInputs) []CheckResult {
 	if in.Manifest == nil && in.ManifestErr == nil {
 		return nil
@@ -134,9 +116,6 @@ func manifestChecks(in doctorInputs) []CheckResult {
 
 	var checks []CheckResult
 
-	// The two cross-checks need the registration. When it could not be read the
-	// rest of the manifest is still worth reporting on, so they are omitted
-	// rather than the whole category being dropped.
 	if in.App != nil {
 		checks = append(checks,
 			checkManifestAudience(in.Manifest, in.App),
@@ -167,25 +146,76 @@ func manifestChecks(in doctorInputs) []CheckResult {
 	return checks
 }
 
+// Sign-in audiences the doctor distinguishes.
+const (
+	AudienceMyOrg        = "AzureADMyOrg"
+	AudienceMultipleOrgs = "AzureADMultipleOrgs"
+)
+
+// tenantRestriction is a multi-tenant application's signInAudienceRestrictions.
+type tenantRestriction struct {
+	Restricted       bool
+	AllowedTenantIDs []string
+}
+
+func parseTenantRestriction(body []byte) (*tenantRestriction, error) {
+	var decoded struct {
+		Restrictions *struct {
+			ODataType        string   `json:"@odata.type"`
+			Kind             string   `json:"kind"`
+			AllowedTenantIDs []string `json:"allowedTenantIds"`
+		} `json:"signInAudienceRestrictions"`
+	}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		return nil, errors.Wrap(err, "failed to parse signInAudienceRestrictions")
+	}
+
+	restrictions := decoded.Restrictions
+	if restrictions == nil {
+		return &tenantRestriction{}, nil
+	}
+
+	restricted := strings.EqualFold(restrictions.Kind, "allowedTenants") ||
+		strings.HasSuffix(restrictions.ODataType, ".allowedTenantsAudience")
+
+	return &tenantRestriction{Restricted: restricted, AllowedTenantIDs: restrictions.AllowedTenantIDs}, nil
+}
+
 // checkSignInAudience verifies the application is registered as single tenant,
 // which is what the plugin's token validation expects.
-func checkSignInAudience(app models.Applicationable) CheckResult {
-	const expected = "AzureADMyOrg"
-
+func checkSignInAudience(app models.Applicationable, restriction *tenantRestriction, restrictionErr error) CheckResult {
 	result := CheckResult{Category: CategoryApplication, Name: "Sign-in audience"}
 	actual := derefString(app.GetSignInAudience())
 
 	switch actual {
-	case expected:
+	case AudienceMyOrg:
 		result.Status = StatusPass
 		result.Summary = "Single tenant (AzureADMyOrg)"
 	case "":
 		result.Status = StatusFail
 		result.Summary = "Sign-in audience is not set"
 		result.Remediation = "Re-run `azure-setup create` to set the sign-in audience to AzureADMyOrg"
+	case AudienceMultipleOrgs:
+		result.Status = StatusWarn
+		result.Remediation = "Re-run `azure-setup create` to make the application single tenant"
+		result.Details = append(result.Details, "the plugin only accepts tokens from the tenant in its Directory (tenant) ID setting")
+
+		switch {
+		case restrictionErr != nil:
+			result.Summary = "Multi-tenant (AzureADMultipleOrgs); the allowed tenants could not be read"
+			result.Details = append(result.Details, "reading signInAudienceRestrictions from Graph beta failed: "+restrictionErr.Error())
+		case restriction != nil && restriction.Restricted:
+			result.Summary = fmt.Sprintf("Multi-tenant (AzureADMultipleOrgs), restricted to %d allowed tenant(s)", len(restriction.AllowedTenantIDs))
+			for _, tenantID := range restriction.AllowedTenantIDs {
+				result.Details = append(result.Details, "allowed tenant: "+tenantID)
+			}
+			result.Details = append(result.Details, "the home tenant is always allowed")
+		default:
+			result.Summary = "Multi-tenant (AzureADMultipleOrgs), usable from any Microsoft Entra tenant"
+		}
 	default:
 		result.Status = StatusWarn
-		result.Summary = fmt.Sprintf("Sign-in audience is %q, the setup tool configures %q", actual, expected)
+		result.Summary = fmt.Sprintf("Sign-in audience is %q, the setup tool configures %q", actual, AudienceMyOrg)
 		result.Remediation = "Re-run `azure-setup create` unless the tenant intentionally uses a different audience"
 	}
 
@@ -212,9 +242,6 @@ func checkApplicationIDURI(app models.Applicationable, siteURL string) CheckResu
 	}
 
 	if siteURL == "" {
-		// Only the scheme and the trailing client ID are checked here, both of
-		// which Azure stores in a fixed case; the path in between is not
-		// inspected without a --site-url to compare it against.
 		configured := strings.ToLower(uris[0])
 		suffix := strings.ToLower("/" + clientID)
 
@@ -285,7 +312,6 @@ func checkExposedScope(app models.Applicationable) CheckResult {
 		result.Details = append(result.Details, fmt.Sprintf("the application exposes %d scopes: %s", total, strings.Join(allScopeNames(app), ", ")))
 	}
 
-	// A disabled scope is never issued in a token, so SSO cannot work at all.
 	if scope.GetIsEnabled() == nil || !*scope.GetIsEnabled() {
 		result.Status = StatusFail
 		result.Summary = "The scope exists but is disabled, so no token can be issued for it"
@@ -295,8 +321,6 @@ func checkExposedScope(app models.Applicationable) CheckResult {
 
 	var problems []string
 
-	// An "Admin" scope still works for the pre-authorized Microsoft clients and
-	// once admin consent is granted, which the consent checks cover separately.
 	if scopeType := derefString(scope.GetTypeEscaped()); scopeType != "User" {
 		problems = append(problems, fmt.Sprintf("consent type is %q, so users cannot consent for themselves", scopeType))
 	}
@@ -333,8 +357,7 @@ func checkPreAuthorizedClients(app models.Applicationable) CheckResult {
 		return result
 	}
 
-	// Azure preserves the casing a client ID was entered with, so every
-	// comparison here is case-insensitive.
+	// Azure preserves the casing a client ID was entered with.
 	managed := make(map[string]bool, len(getPreAuthorizedClients()))
 	for _, clientID := range getPreAuthorizedClients() {
 		managed[strings.ToLower(clientID)] = true
@@ -390,10 +413,8 @@ func checkPreAuthorizedClients(app models.Applicationable) CheckResult {
 	return result
 }
 
-// checkRequiredPermissions verifies only the permissions the plugin itself
-// needs. Anything else on the application - including the read-only permissions
-// added by `create --create-doctor-requirements` - is named in the details but
-// never affects the status: this tool does not require them to be present.
+// checkRequiredPermissions verifies the permissions the plugin itself needs.
+// Anything else is listed in the details without affecting the status.
 func checkRequiredPermissions(app models.Applicationable, permissionNames map[string]string) CheckResult {
 	result := CheckResult{Category: CategoryPermissions, Name: "Requested Graph permissions"}
 
@@ -503,8 +524,6 @@ func checkDelegatedConsent(consent consentState, app models.Applicationable, por
 
 	required := requiredPermissionNames(PermissionTypeScope)
 
-	// A scope consented per user still prompts everyone else, so a tenant-wide
-	// grant and a single-user grant are tracked separately rather than merged.
 	var missing, userOnly []string
 	for _, name := range required {
 		switch {
@@ -525,13 +544,7 @@ func checkDelegatedConsent(consent consentState, app models.Applicationable, por
 	consentLink := adminConsentURL(portalHost, derefString(app.GetAppId()))
 
 	if len(missing) > 0 {
-		// The plugin authenticates to Graph app-only (server/plugin.go builds
-		// the app client, which uses a client-credentials token), so it never
-		// exercises a delegated permission. A tenant that consented only the
-		// application permissions is therefore a working install, and failing
-		// the run would turn a healthy deployment red in CI. It is still
-		// reported, because `azure-setup create` requests these and an
-		// operator who believes they were consented should know otherwise.
+		// Warn, not fail: the plugin authenticates app-only and never uses delegated permissions.
 		result.Status = StatusWarn
 		result.Summary = "Not consented: " + strings.Join(missing, ", ") +
 			" (the plugin authenticates app-only, so this does not block it)"
@@ -588,9 +601,7 @@ func checkAppRoleConsent(consent consentState, app models.Applicationable, porta
 	return result
 }
 
-// checkClientSecrets reports on the application's client secrets: the plugin
-// needs at least one that has not expired, and operators need warning before
-// the one in use lapses.
+// checkClientSecrets requires at least one unexpired secret and warns before they all lapse.
 func checkClientSecrets(app models.Applicationable, now time.Time, warningDays int) CheckResult {
 	result := CheckResult{Category: CategoryCredentials, Name: "Client secrets"}
 
@@ -756,24 +767,27 @@ func checkDuplicateApplications(app models.Applicationable, duplicates []string,
 	return result
 }
 
-// equalApplicationIDURI compares two api:// identifier URIs the way they are
-// actually resolved. The host is case-insensitive per DNS, so an operator
-// typing --site-url https://Corp.Example.com must still match the URI Azure
-// holds. Everything after it is not: Entra issues the identifier URI verbatim
-// as the token audience, and the plugin compares that audience exactly, so
-// api://corp.example.com/Mattermost/<id> and .../mattermost/<id> are two
-// different audiences and only one of them works.
+// equalApplicationIDURI compares two api:// identifier URIs. The host is
+// case-insensitive per DNS; the path is not, because Entra issues the URI
+// verbatim as the token audience and the plugin compares it exactly.
 func equalApplicationIDURI(a, b string) bool {
-	const scheme = "api://"
-
-	if !strings.HasPrefix(strings.ToLower(a), scheme) || !strings.HasPrefix(strings.ToLower(b), scheme) {
+	uriA, okA := parseAPIURI(a)
+	uriB, okB := parseAPIURI(b)
+	if !okA || !okB {
 		return a == b
 	}
 
-	hostA, restA, hasPathA := strings.Cut(a[len(scheme):], "/")
-	hostB, restB, hasPathB := strings.Cut(b[len(scheme):], "/")
+	return strings.EqualFold(uriA.Host, uriB.Host) && uriA.Path == uriB.Path
+}
 
-	return strings.EqualFold(hostA, hostB) && hasPathA == hasPathB && restA == restB
+// parseAPIURI parses an api:// identifier URI.
+func parseAPIURI(uri string) (*url.URL, bool) {
+	parsed, err := url.Parse(uri)
+	if err != nil || parsed.Scheme != "api" {
+		return nil, false
+	}
+
+	return parsed, true
 }
 
 // findScopeByName returns the exposed OAuth2 permission scope with the given

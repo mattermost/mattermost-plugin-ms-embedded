@@ -97,13 +97,9 @@ func resolveCloud(name string) (cloudenv.Environment, error) {
 type directoryContext struct {
 	UserPrincipalName string
 
-	// AdminRoles lists the display names of the application administration roles
-	// held by the signed-in user.
 	AdminRoles []string
 
-	// RolesErr records a failure to read the directory role membership. Role
-	// lookup is not always permitted, so callers treat this as unknown rather
-	// than as a lack of permissions.
+	// RolesErr means the roles are unknown, not absent.
 	RolesErr error
 }
 
@@ -132,10 +128,7 @@ func describeSignedInUser(ctx context.Context, client *msgraphsdk.GraphServiceCl
 		return directory, nil
 	}
 
-	// memberOf returns groups as well as directory roles, so a user in a
-	// well-populated tenant can easily span several pages and have their
-	// administrator role land on a later one. Reading only the first page
-	// would report a Global Administrator as holding no admin role.
+	// memberOf includes groups, so an admin role can land on a later page.
 	if err = iteratePages(ctx, client, memberOf,
 		models.CreateDirectoryObjectCollectionResponseFromDiscriminatorValue,
 		func(member models.DirectoryObjectable) {
@@ -164,9 +157,16 @@ func validatePermissions(ctx context.Context, client *msgraphsdk.GraphServiceCli
 		progressln("🔍 Checking user permissions...")
 	}
 
+	// /me only exists for delegated flows, so application credentials land here.
 	directory, err := describeSignedInUser(ctx, client)
 	if err != nil {
-		return err
+		progressln("⚠️  Warning: No signed-in user, so directory roles cannot be checked")
+		progressln("   This is expected with application (service principal) credentials, which need the")
+		progressln("   Application.ReadWrite.All application permission with admin consent")
+		if verbose {
+			progressf("   Error details: %v\n", err)
+		}
+		return nil
 	}
 
 	if verbose {

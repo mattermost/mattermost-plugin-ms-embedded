@@ -135,8 +135,6 @@ func tryInteractiveBrowserCredential(env cloudenv.Environment, tenantID string) 
 func tryDeviceCodeCredential(env cloudenv.Environment, tenantID string) (azcore.TokenCredential, error) {
 	opts := &azidentity.DeviceCodeCredentialOptions{
 		UserPrompt: func(ctx context.Context, message azidentity.DeviceCodeMessage) error {
-			// stderr, so the prompt reaches the operator without corrupting a
-			// report being piped from stdout (doctor -o json).
 			progressln("\n" + message.Message)
 			return nil
 		},
@@ -189,9 +187,7 @@ func validateAzureConnection(ctx context.Context, env cloudenv.Environment, cred
 }
 
 // newGraphClient builds a Microsoft Graph client bound to the given national
-// cloud. The cloud's Graph scope is requested so the token audience matches the
-// cloud's Graph endpoint (for example graph.microsoft.us), and the adapter base
-// URL is set explicitly because DoD uses a different Graph host than GCC High.
+// cloud's Graph scope and endpoint.
 func newGraphClient(env cloudenv.Environment, cred azcore.TokenCredential) (*msgraphsdk.GraphServiceClient, error) {
 	authProvider, err := authentication.NewAzureIdentityAuthenticationProviderWithScopes(cred, []string{env.GraphScope})
 	if err != nil {

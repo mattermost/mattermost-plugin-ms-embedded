@@ -6,15 +6,18 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"time"
 
+	abstractions "github.com/microsoft/kiota-abstractions-go"
 	"github.com/microsoft/kiota-abstractions-go/serialization"
 	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
 	msgraphcore "github.com/microsoftgraph/msgraph-sdk-go-core"
 	"github.com/microsoftgraph/msgraph-sdk-go/applications"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
+	"github.com/microsoftgraph/msgraph-sdk-go/models/odataerrors"
 	"github.com/microsoftgraph/msgraph-sdk-go/serviceprincipals"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -22,8 +25,8 @@ import (
 	"github.com/mattermost/mattermost-plugin-ms-embedded/server/cloudenv"
 )
 
-// doctorApplicationSelect lists every application property the doctor inspects.
-// Graph omits most of these unless they are explicitly selected.
+// doctorApplicationSelect lists every application property the doctor inspects;
+// Graph omits most unless selected.
 var doctorApplicationSelect = []string{
 	"id",
 	"appId",
@@ -40,9 +43,6 @@ var doctorApplicationSelect = []string{
 // runDoctor inspects an existing Azure application registration and prints a
 // report describing whether it is configured the way the plugin needs.
 func runDoctor(cmd *cobra.Command, args []string) error {
-	// Flags have parsed by the time RunE is reached, so any failure from here on
-	// is a finding or an Azure error rather than a usage mistake: the report must
-	// not be followed by a dump of the flag list.
 	cmd.SilenceUsage = true
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -53,8 +53,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "invalid input")
 	}
 
-	// Validate every flag before authenticating: an interactive login plus a
-	// full Graph inspection is an expensive way to learn about a typo.
+	// Validate every flag before the (possibly interactive) login.
 	if _, err = normalizeReportFormat(flagOutputFormat); err != nil {
 		return errors.Wrap(err, "invalid input")
 	}
@@ -86,10 +85,6 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	progressln("🩺 Running Azure configuration doctor...")
 
-	// Loaded before authenticating so a malformed package fails fast, and
-	// because it can supply the site URL the Application ID URI is checked
-	// against. It deliberately never supplies the client ID: both sides of that
-	// comparison coming from the same file would make the check vacuous.
 	manifest, manifestErr := loadDoctorManifest(report)
 
 	client, err := connectDoctor(ctx, env, report)
@@ -111,10 +106,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		return errors.Errorf("doctor found %d failing check(s)", report.Summary.Failed)
 	}
 
-	// Individual skipped checks only warn, because a deliberately narrow
-	// credential makes some of them unanswerable by design. Failing to read
-	// the application at all is different: nothing about it was verified, so
-	// exiting 0 would tell a CI job the opposite of the truth.
+	// Skipped checks only warn, but an unreadable application means nothing was verified.
 	if report.ApplicationClientID == "" {
 		return errors.New("doctor could not inspect the application, so nothing about it was verified")
 	}
@@ -139,9 +131,7 @@ func connectDoctor(ctx context.Context, env cloudenv.Environment, report *Doctor
 		return nil, err
 	}
 
-	// The signed-in identity is looked up with /me, which only exists for
-	// delegated flows. App-only credentials (the usual CI setup) cannot call it,
-	// so a failure here degrades the identity checks instead of ending the run.
+	// /me only exists for delegated flows, so app-only credentials fail here by design.
 	directory, identityErr := describeSignedInUser(ctx, client)
 	report.SignedInAs = directory.UserPrincipalName
 
@@ -174,15 +164,8 @@ func connectDoctor(ctx context.Context, env cloudenv.Environment, report *Doctor
 	return client, nil
 }
 
-// identityChecks describes who the tool is authenticating as.
-//
-// The signed-in identity is read with /me, which only exists for delegated
-// flows. Nothing in the audit depends on it: the doctor never writes, so the
-// operator's own roles do not affect what it can determine about the
-// application, and application credentials are the documented way to run this
-// command. Its absence is therefore reported as context and never degrades the
-// verdict - a skip here would imply something about the application went
-// unverified, and make a clean audit permanently unable to report pass.
+// identityChecks describes who the tool is authenticating as. A missing user
+// never degrades the verdict: nothing about the application depends on it.
 func identityChecks(env cloudenv.Environment, directory directoryContext, identityErr error) []CheckResult {
 	signIn := CheckResult{
 		Category: CategoryIdentity,
@@ -201,15 +184,10 @@ func identityChecks(env cloudenv.Environment, directory directoryContext, identi
 		"no signed-in user: "+identityErr.Error(),
 		"expected with application (client credentials) auth, which has no user context")
 
-	// With no user, "which roles does the user hold" is not applicable rather
-	// than unanswered, so the check is omitted instead of skipped.
 	return []CheckResult{signIn}
 }
 
-// checkDirectoryRoles turns the signed-in user's directory roles into a check so
-// the report explains up front whether the operator can fix what it finds. It
-// is only meaningful for a delegated sign-in; callers omit it entirely when
-// there is no user.
+// checkDirectoryRoles reports whether the signed-in user can fix what the report finds.
 func checkDirectoryRoles(directory directoryContext) CheckResult {
 	result := CheckResult{Category: CategoryIdentity, Name: "Directory roles"}
 
@@ -235,14 +213,9 @@ func checkDirectoryRoles(directory directoryContext) CheckResult {
 // inspectApplication locates the application under inspection, gathers the
 // related Graph objects, and appends every configuration check to the report.
 func inspectApplication(ctx context.Context, client *msgraphsdk.GraphServiceClient, env cloudenv.Environment, report *DoctorReport, manifest *teamsManifest, manifestErr error) error {
-	app, matches, err := findApplicationForDoctor(ctx, client, flagAppName, flagClientID)
+	app, err := findApplicationForDoctor(ctx, client, flagAppName, flagClientID)
 	if err != nil {
-		// Reading the application is the one lookup every later check depends
-		// on, so the inspection stops here - but the report is still finalized
-		// and emitted. A credential that cannot read applications is precisely
-		// what the operator needs told, and returning an error instead would
-		// discard the identity checks that already passed and skip
-		// --report-file entirely.
+		// Recorded rather than returned so the identity checks and --report-file still get emitted.
 		report.Add(CheckResult{
 			Category:    CategoryApplication,
 			Name:        "Application registration",
@@ -275,34 +248,38 @@ func inspectApplication(ctx context.Context, client *msgraphsdk.GraphServiceClie
 		report.ApplicationIDURI = uris[0]
 	}
 
+	duplicates, duplicatesErr := findDuplicateApplications(ctx, client, report.ApplicationName, report.ApplicationClientID)
+
+	matches := 1
+	if flagClientID == "" {
+		matches += len(duplicates)
+	}
 	report.Add(checkApplicationLookup(report, matches))
 
 	inputs := doctorInputs{
-		App:               app,
-		SiteURL:           report.MattermostSiteURL,
-		PortalHost:        env.PortalHost,
-		Now:               time.Now(),
-		SecretWarningDays: flagSecretWarningDays,
-		Manifest:          manifest,
-		ManifestErr:       manifestErr,
+		App:                app,
+		SiteURL:            report.MattermostSiteURL,
+		PortalHost:         env.PortalHost,
+		Now:                time.Now(),
+		SecretWarningDays:  flagSecretWarningDays,
+		Manifest:           manifest,
+		ManifestErr:        manifestErr,
+		DuplicateClientIDs: duplicates,
+		DuplicatesErr:      duplicatesErr,
 	}
 
-	// The Microsoft Graph service principal is read once: it is the resource
-	// every consent grant points at, and it also names the permission IDs found
-	// on the application.
+	if derefString(app.GetSignInAudience()) == AudienceMultipleOrgs {
+		inputs.TenantRestriction, inputs.TenantRestrictionErr = readTenantRestriction(ctx, client, env, report.ApplicationObjectID)
+	}
+
 	graphSP, graphSPErr := findGraphServicePrincipal(ctx, client)
 	inputs.GraphPermissionNames = graphPermissionNames(graphSP)
 
 	inputs.ServicePrincipal, inputs.ServicePrincipalErr = findServicePrincipal(ctx, client, report.ApplicationClientID)
 	inputs.Consent = readConsentState(ctx, client, inputs.ServicePrincipal, inputs.ServicePrincipalErr, graphSP, graphSPErr)
 	inputs.Owners, inputs.OwnersErr = listApplicationOwners(ctx, client, report.ApplicationObjectID)
-	inputs.DuplicateClientIDs, inputs.DuplicatesErr = findDuplicateApplications(ctx, client, report.ApplicationName, report.ApplicationClientID)
 
-	// The catalog lookup needs the manifest's id, so it only runs when a
-	// manifest was supplied and parsed.
-	// An empty id would issue `externalId eq ''`, which can match an unrelated
-	// store-distributed app and report it as this one. The Teams app ID check
-	// already fails for that case.
+	// An empty id would issue `externalId eq ''` and can match an unrelated store app.
 	if manifest != nil && manifest.ID != "" {
 		inputs.CatalogLookup = true
 		inputs.CatalogApp, inputs.CatalogErr = findCatalogApp(ctx, client, manifest.ID)
@@ -316,9 +293,8 @@ func inspectApplication(ctx context.Context, client *msgraphsdk.GraphServiceClie
 }
 
 // checkApplicationLookup reports which registration the rest of the report
-// describes. Several registrations can share a display name, and the lookup
-// picks the first one Graph returns, so an ambiguous match is a failure: every
-// check below it would otherwise be a confident verdict about an arbitrary app.
+// describes. An ambiguous display-name match fails, because the lookup picks
+// whichever registration Graph returns first.
 func checkApplicationLookup(report *DoctorReport, matches int) CheckResult {
 	result := CheckResult{Category: CategoryApplication, Name: "Application registration"}
 
@@ -337,10 +313,7 @@ func checkApplicationLookup(report *DoctorReport, matches int) CheckResult {
 	return result
 }
 
-// loadDoctorManifest reads the manifest named by --manifest and records it on
-// the report. When --site-url was not given, the host the manifest itself
-// claims is used instead, so a package alone is enough to verify the
-// Application ID URI.
+// loadDoctorManifest reads the manifest named by --manifest and records it on the report.
 func loadDoctorManifest(report *DoctorReport) (*teamsManifest, error) {
 	if flagManifest == "" {
 		return nil, nil
@@ -353,12 +326,7 @@ func loadDoctorManifest(report *DoctorReport) (*teamsManifest, error) {
 
 	report.ManifestPath = manifest.SourcePath
 
-	// The site URL is deliberately NOT taken from the manifest. Building the
-	// expected Application ID URI out of the manifest and then comparing it to
-	// the registration would be circular: checkApplicationIDURI would pass even
-	// when both sides name the wrong server. The manifest is cross-checked
-	// against the registration directly instead, which is a real comparison
-	// between two independent sources.
+	// Shown as context only: deriving the expected URI from the manifest would be circular.
 	if flagSiteURL == "" {
 		report.ManifestHost = manifestResourceHost(manifest)
 	}
@@ -366,10 +334,7 @@ func loadDoctorManifest(report *DoctorReport) (*teamsManifest, error) {
 	return manifest, nil
 }
 
-// addManifestOnlyChecks runs the manifest checks that need no registration
-// data, for the paths where the application could not be read. Most of the
-// manifest is self-consistent and worth reporting on regardless - including
-// the manifest being unreadable at all.
+// addManifestOnlyChecks runs the manifest checks that need no registration data.
 func addManifestOnlyChecks(report *DoctorReport, manifest *teamsManifest, manifestErr error) {
 	if manifest == nil && manifestErr == nil {
 		return
@@ -391,9 +356,7 @@ func describeMissingApplication(appName, clientID string) string {
 
 // findApplicationForDoctor looks up the application by client ID when one was
 // supplied, otherwise by display name, selecting every property the checks read.
-// The second return value is how many applications matched, so the caller can
-// flag an ambiguous display-name lookup.
-func findApplicationForDoctor(ctx context.Context, client *msgraphsdk.GraphServiceClient, appName, clientID string) (models.Applicationable, int, error) {
+func findApplicationForDoctor(ctx context.Context, client *msgraphsdk.GraphServiceClient, appName, clientID string) (models.Applicationable, error) {
 	filter := fmt.Sprintf("displayName eq '%s'", escapeODataString(appName))
 	if clientID != "" {
 		filter = fmt.Sprintf("appId eq '%s'", escapeODataString(clientID))
@@ -406,24 +369,14 @@ func findApplicationForDoctor(ctx context.Context, client *msgraphsdk.GraphServi
 		},
 	})
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
 
 	if apps == nil || len(apps.GetValue()) == 0 {
-		return nil, 0, nil
+		return nil, nil
 	}
 
-	// The match count decides whether the report is describing an unambiguous
-	// registration, so it has to span every page rather than the first one.
-	matches := 0
-	if err = iteratePages(ctx, client, apps,
-		models.CreateApplicationCollectionResponseFromDiscriminatorValue,
-		func(models.Applicationable) { matches++ },
-	); err != nil {
-		return nil, 0, err
-	}
-
-	return apps.GetValue()[0], matches, nil
+	return apps.GetValue()[0], nil
 }
 
 // findDuplicateApplications returns the client IDs of other applications that
@@ -482,11 +435,8 @@ func findServicePrincipal(ctx context.Context, client *msgraphsdk.GraphServiceCl
 	return principals.GetValue()[0], nil
 }
 
-// readConsentState collects the Graph permissions actually granted to the
-// application's service principal. Both delegated grants and application role
-// assignments are scoped to the Microsoft Graph service principal so unrelated
-// grants in the tenant are ignored, and each lookup records its own error so a
-// failure to read one does not hide the other.
+// readConsentState collects the Microsoft Graph permissions granted to the
+// application's service principal.
 func readConsentState(ctx context.Context, client *msgraphsdk.GraphServiceClient, sp models.ServicePrincipalable, spErr error, graphSP models.ServicePrincipalable, graphSPErr error) consentState {
 	if spErr != nil {
 		return consentState{DelegatedErr: spErr, AppRoleErr: spErr}
@@ -504,9 +454,6 @@ func readConsentState(ctx context.Context, client *msgraphsdk.GraphServiceClient
 	spID := derefString(sp.GetId())
 	state := consentState{}
 
-	// Both collections are paged. Per-user consent creates one grant per user,
-	// so a widely used application can hold far more than a single page, and a
-	// truncated read would report consent that exists as missing.
 	grants, err := client.ServicePrincipals().ByServicePrincipalId(spID).Oauth2PermissionGrants().Get(ctx, nil)
 	if err != nil {
 		state.DelegatedErr = err
@@ -518,9 +465,6 @@ func readConsentState(ctx context.Context, client *msgraphsdk.GraphServiceClient
 					return
 				}
 
-				// Each grant carries its own consent type, so the scopes are kept
-				// apart: merging them would report a single user's consent as
-				// tenant-wide whenever any other grant happens to be AllPrincipals.
 				scopes := strings.Fields(derefString(grant.GetScope()))
 				if strings.EqualFold(derefString(grant.GetConsentType()), "AllPrincipals") {
 					state.TenantWideScopes = append(state.TenantWideScopes, scopes...)
@@ -549,9 +493,33 @@ func readConsentState(ctx context.Context, client *msgraphsdk.GraphServiceClient
 	return state
 }
 
+// readTenantRestriction reads the application's signInAudienceRestrictions,
+// which only the beta endpoint exposes.
+func readTenantRestriction(ctx context.Context, client *msgraphsdk.GraphServiceClient, env cloudenv.Environment, objectID string) (*tenantRestriction, error) {
+	uri, err := url.Parse(strings.TrimSuffix(env.GraphBaseURL, "/v1.0") + "/beta/applications/" + url.PathEscape(objectID) + "?$select=signInAudienceRestrictions")
+	if err != nil {
+		return nil, err
+	}
+
+	request := abstractions.NewRequestInformation()
+	request.Method = abstractions.GET
+	request.SetUri(*uri)
+	request.Headers.TryAdd("Accept", "application/json")
+
+	body, err := client.GetAdapter().SendPrimitive(ctx, request, "[]byte", abstractions.ErrorMappings{
+		"XXX": odataerrors.CreateODataErrorFromDiscriminatorValue,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	raw, _ := body.([]byte)
+
+	return parseTenantRestriction(raw)
+}
+
 // iteratePages walks every page of a Graph collection response, invoking visit
-// for each item. Graph caps a collection page at a few hundred items and
-// signals the rest with an @odata.nextLink, which a single Get does not follow.
+// for each item. A single Get does not follow @odata.nextLink.
 func iteratePages[T any](
 	ctx context.Context,
 	client *msgraphsdk.GraphServiceClient,
@@ -559,8 +527,6 @@ func iteratePages[T any](
 	factory serialization.ParsableFactory,
 	visit func(item T),
 ) error {
-	// A nil collection means Graph returned no body: an empty result, not a
-	// failure, so it must not surface as an unreadable check.
 	if response == nil {
 		return nil
 	}
@@ -576,10 +542,7 @@ func iteratePages[T any](
 	})
 }
 
-// findGraphServicePrincipal returns the Microsoft Graph service principal in
-// this tenant. It is the resource every plugin permission is granted against,
-// and its appRoles and oauth2PermissionScopes name the permission IDs that
-// appear on the application.
+// findGraphServicePrincipal returns the Microsoft Graph service principal in this tenant.
 func findGraphServicePrincipal(ctx context.Context, client *msgraphsdk.GraphServiceClient) (models.ServicePrincipalable, error) {
 	filter := fmt.Sprintf("appId eq '%s'", GraphResourceID)
 
@@ -600,9 +563,8 @@ func findGraphServicePrincipal(ctx context.Context, client *msgraphsdk.GraphServ
 	return principals.GetValue()[0], nil
 }
 
-// graphPermissionNames maps Graph permission IDs to their names, so the report
-// can print "Directory.Read.All" instead of a bare UUID. It returns nil when the
-// Graph service principal could not be read, which callers treat as "unknown".
+// graphPermissionNames maps Graph permission IDs to their names, or returns nil
+// when the Graph service principal could not be read.
 func graphPermissionNames(graphSP models.ServicePrincipalable) map[string]string {
 	if graphSP == nil {
 		return nil
@@ -679,8 +641,6 @@ func emitDoctorReport(report *DoctorReport, format, reportFile string) error {
 		return nil
 	}
 
-	// The path comes from the operator's own --report-file flag, so it is
-	// deliberately arbitrary.
 	file, err := os.Create(reportFile) // #nosec G304
 	if err != nil {
 		return errors.Wrapf(err, "failed to create report file %s", reportFile)

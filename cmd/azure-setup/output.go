@@ -87,9 +87,22 @@ func outputHuman(result *SetupResult) error {
 	fmt.Println("   - In Mattermost, go to the plugin settings")
 	fmt.Println("   - Download the app manifest")
 	fmt.Println("   - Upload it to Microsoft Teams Admin Center")
+	fmt.Println("\n4. If the app must work for users outside the tenant where it is installed:")
+	fmt.Println("   - Open Azure Portal > App registrations > this app > Authentication")
+	fmt.Println("   - Set Supported account types to \"Accounts in any organizational directory (Multitenant)\"")
+	fmt.Printf("   %s\n", authenticationSettingsURL(result.PortalHost, result.ApplicationClientID))
 	fmt.Println(strings.Repeat("-", 70))
 
 	return nil
+}
+
+// authenticationSettingsURL builds the Azure portal Authentication settings deep link.
+func authenticationSettingsURL(portalHost, clientID string) string {
+	if portalHost == "" {
+		portalHost = "portal.azure.com"
+	}
+
+	return fmt.Sprintf("https://%s/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/Authentication/appId/%s", portalHost, clientID)
 }
 
 // outputJSON outputs results in JSON format

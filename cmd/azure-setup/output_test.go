@@ -207,6 +207,9 @@ func TestOutputHuman(t *testing.T) {
 				"Client Secret:",
 				"NEXT STEPS",
 				"Grant admin consent",
+				"outside the tenant where it is installed",
+				"Multitenant",
+				"ApplicationMenuBlade/~/Authentication/appId/abc123-def456",
 			},
 		},
 		{
@@ -229,6 +232,8 @@ func TestOutputHuman(t *testing.T) {
 				"existing Azure application has been updated",
 				"Tenant ID:",
 				"Application Client ID:",
+				"outside the tenant where it is installed",
+				"Multitenant",
 			},
 		},
 		{
