@@ -62,6 +62,28 @@ func TestIFrame(t *testing.T) {
 		assert.Contains(t, string(body), "<html")
 		assert.Contains(t, string(body), "</html>")
 	})
+
+	t.Run("renders the Teams app ID only for the notification preview tab", func(t *testing.T) {
+		require.NoError(t, th.p.pluginStore.StoreAppID("test-tenant-id", "test-app-id"))
+
+		for _, tc := range []struct {
+			target string
+			appID  string
+		}{
+			{"/iframe/mattermostTab?action=notification_preview", "test-app-id"},
+			{"/iframe/mattermostTab", ""},
+		} {
+			w := httptest.NewRecorder()
+			th.p.apiHandler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, tc.target, nil))
+
+			resp := w.Result()
+			body, err := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			require.NoError(t, err)
+			require.Equal(t, http.StatusOK, resp.StatusCode)
+			assert.Contains(t, string(body), "appId: '"+tc.appID+"'", tc.target)
+		}
+	})
 }
 
 func TestAuthenticate(t *testing.T) {

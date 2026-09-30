@@ -63,7 +63,7 @@
         }
       }
 
-      // Listen for a message from the iframe "mattermost_external_auth_login" sent by using `window.parent.postMessage`
+      // Handles the auth and notification navigate messages the child iframe sends with `window.parent.postMessage`.
       window.addEventListener('message', async function (event) {
         if (event.data.type === 'mattermost_external_auth_login') {
           console.log('Received message from Mattermost:', event.data);

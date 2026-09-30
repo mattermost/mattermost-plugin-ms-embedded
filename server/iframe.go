@@ -75,7 +75,9 @@ func (a *API) iFrame(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to create iFrame context", http.StatusInternalServerError)
 		return
 	}
-	iFrameCtx.TeamsAppID = a.getTeamsAppID()
+	if r.URL.Query().Get("action") == "notification_preview" {
+		iFrameCtx.TeamsAppID = a.getTeamsAppID()
+	}
 
 	html, err := a.formatTemplate(assets.IFrameHTMLTemplate, iFrameCtx)
 	if err != nil {
