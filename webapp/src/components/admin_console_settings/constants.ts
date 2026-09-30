@@ -4,6 +4,9 @@
 // Custom event for input changes
 export const EVENT_APP_INPUT_CHANGE = 'com.mattermost.ms-embedded__app_input_change';
 
+// Teams limits the app manifest's name.short to 30 characters
+export const APP_NAME_MAX_LENGTH = 30;
+
 // Type for the custom event data
 export interface AppInputChangeEvent {
     id: string;

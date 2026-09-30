@@ -12,6 +12,7 @@ interface Props {
     placeholder?: string;
     value: string;
     disabled?: boolean;
+    maxLength?: number;
     onChange: (id: string, value: string) => void;
 }
 
@@ -43,6 +44,7 @@ const TextInput: React.FC<Props> = (props) => {
                     value={props.value}
                     onChange={handleChange}
                     disabled={props.disabled}
+                    maxLength={props.maxLength}
                 />
             </div>
         </div>
