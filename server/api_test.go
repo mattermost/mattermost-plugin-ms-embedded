@@ -258,9 +258,10 @@ func TestIframeNotificationPreview(t *testing.T) {
 
 		// Check for CSP headers
 		assert.Contains(t, resp.Header.Get("Content-Security-Policy"), "style-src 'nonce-")
-		assert.Contains(t, resp.Header.Get("Content-Security-Policy"), "script-src https://res.cdn.office.net https://cdn.jsdelivr.net 'nonce-")
+		assert.Contains(t, resp.Header.Get("Content-Security-Policy"), "script-src https://cdn.jsdelivr.net 'nonce-")
 		assert.Contains(t, resp.Header.Get("Content-Security-Policy"), "script-src-attr 'nonce-")
-		assert.Contains(t, resp.Header.Get("Content-Security-Policy"), "connect-src https://*.microsoft.com https://*.teams.microsoft.com https://*.cdn.office.net")
+		assert.Contains(t, resp.Header.Get("Content-Security-Policy"), "connect-src 'none'")
+		assert.NotContains(t, resp.Header.Get("Content-Security-Policy"), "res.cdn.office.net")
 		assert.Contains(t, resp.Header.Get("Content-Security-Policy"), "img-src 'self'")
 		assert.Contains(t, resp.Header.Get("Content-Security-Policy"), "report-to csp-endpoint")
 		assert.Equal(t, "nosniff", resp.Header.Get("X-Content-Type-Options"))

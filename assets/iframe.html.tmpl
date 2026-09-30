@@ -67,17 +67,19 @@
       window.addEventListener('message', async function (event) {
         if (event.data.type === 'mattermost_external_auth_login') {
           console.log('Received message from Mattermost:', event.data);
-          // Reply the message to let Mattermost know we are going to handle the authentication flow.
-          event.source.postMessage({type: 'mattermost_external_auth_login', ack: true}, domainRoot);
-
-          iframe.src = domainRoot + '/plugins/{{.PluginID}}/sso/wait';
-
-
-          // Ensure that the URL hostname is the same as domainRoot
           if (!isValidOrigin(event.origin, domainRoot)) {
             console.error('Rejecting unknown origin: ' + event.origin);
             return;
           }
+          if (event.source !== iframe.contentWindow) {
+            console.error('Rejecting auth login message from unexpected frame');
+            return;
+          }
+
+          // Reply the message to let Mattermost know we are going to handle the authentication flow.
+          event.source.postMessage({type: 'mattermost_external_auth_login', ack: true}, domainRoot);
+
+          iframe.src = domainRoot + '/plugins/{{.PluginID}}/sso/wait';
 
           // Parse the URL and add redirect_to parameter
           const url = new URL(event.data.href);
@@ -107,6 +109,14 @@
         // External auth is completed, move the iframe to Mattermost again.
         if (event.data.type === 'mattermost_external_auth_complete') {
           console.log('Received message from Mattermost:', event.data);
+          if (!isValidOrigin(event.origin, domainRoot)) {
+            console.error('Rejecting unknown origin: ' + event.origin);
+            return;
+          }
+          if (event.source !== iframe.contentWindow) {
+            console.error('Rejecting auth complete message from unexpected frame');
+            return;
+          }
           iframe.src = domainRoot;
         }
 

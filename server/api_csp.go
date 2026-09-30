@@ -15,6 +15,10 @@ const (
 	// values come from cloudenv.Environment.CSPConnectSrc.
 	DefaultCSPScriptSrc = "https://res.cdn.office.net https://cdn.jsdelivr.net"
 
+	// NotificationPreviewCSPScriptSrc omits the Teams SDK CDN because the
+	// preview delegates navigation to the shell instead of loading teams-js.
+	NotificationPreviewCSPScriptSrc = "https://cdn.jsdelivr.net"
+
 	// maxCSPReportFieldLen limits logged CSP report string fields to prevent log injection and size abuse.
 	maxCSPReportFieldLen = 500
 )

@@ -75,6 +75,7 @@ func (a *API) iFrame(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to create iFrame context", http.StatusInternalServerError)
 		return
 	}
+	iFrameCtx.TeamsAppID = a.getTeamsAppID()
 
 	html, err := a.formatTemplate(assets.IFrameHTMLTemplate, iFrameCtx)
 	if err != nil {
@@ -147,8 +148,8 @@ func (a *API) iframeNotificationPreview(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	iFrameCtx.CSPConnectSrc = a.p.getConfiguration().CloudEnvironment().CSPConnectSrc
-	iFrameCtx.CSPScriptSrc = DefaultCSPScriptSrc
+	iFrameCtx.CSPConnectSrc = "'none'"
+	iFrameCtx.CSPScriptSrc = NotificationPreviewCSPScriptSrc
 	a.returnCSPHeaders(w, iFrameCtx)
 	w.Header().Set("Content-Type", "text/html")
 	w.WriteHeader(http.StatusOK)
@@ -164,22 +165,10 @@ func (a *API) createIFrameContext(userID string, post *model.Post) (iFrameContex
 		return iFrameContext{}, fmt.Errorf("ServiceSettings.SiteURL cannot be empty for MS Teams iFrame")
 	}
 
-	var appID string
-	var err error
-	// Get the app ID using the client's tenant ID to ensure consistency with storage
-	client := a.p.GetClientForApp()
-	if client != nil {
-		appID, err = a.p.pluginStore.GetAppID(client.GetTenantID())
-		if err != nil {
-			a.p.API.LogWarn("Failed to get app ID, button in notification preview won't work", "tenantID", client.GetTenantID(), "error", err.Error())
-		}
-	}
-
 	iFrameCtx := iFrameContext{
 		SiteURL:        *config.ServiceSettings.SiteURL,
 		PluginID:       url.PathEscape(manifest.Id),
 		TenantID:       a.p.getConfiguration().M365TenantID,
-		TeamsAppID:     appID,
 		UserID:         userID,
 		Post:           post,
 		TeamsJSVersion: TeamsJSVersion,
@@ -237,6 +226,20 @@ func (a *API) createIFrameContext(userID string, post *model.Post) (iFrameContex
 	}
 
 	return iFrameCtx, nil
+}
+
+func (a *API) getTeamsAppID() string {
+	// Get the app ID using the client's tenant ID to ensure consistency with storage
+	client := a.p.GetClientForApp()
+	if client == nil {
+		return ""
+	}
+
+	appID, err := a.p.pluginStore.GetAppID(client.GetTenantID())
+	if err != nil {
+		a.p.API.LogWarn("Failed to get app ID, View in Mattermost button in notification previews won't work", "tenantID", client.GetTenantID(), "error", err.Error())
+	}
+	return appID
 }
 
 // formatTemplate formats the iFrame HTML template with the site URL and plugin ID

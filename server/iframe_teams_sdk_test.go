@@ -76,27 +76,64 @@ func TestNotificationNavigateContract(t *testing.T) {
 	require.NoError(t, err)
 	previewStr := string(preview)
 
-	assert.Contains(t, previewStr, "mattermost_notification_navigate")
-	assert.Contains(t, previewStr, "window.parent.postMessage")
+	postToShell := regexp.MustCompile(`window\.parent\.postMessage\(\{\s*type: 'mattermost_notification_navigate',\s*subPageId: 'post_\{\{\.Post\.Id\}\}'\s*\},\s*"\{\{\.SiteURL\}\}"\)`)
+	assert.Regexp(t, postToShell, previewStr, "preview must post the navigate message to the SiteURL origin only")
 	assert.NotContains(t, previewStr, "teams-js/")
 	assert.NotContains(t, previewStr, "app.initialize")
+
+	handler := shellMessageHandler(t, "mattermost_notification_navigate")
+	assertChecksPrecede(t, handler, "navigateToApp",
+		"isValidOrigin(event.origin, domainRoot)", "event.source !== iframe.contentWindow", "subPageId !== 'string'")
+
+	assert.Contains(t, handler, "pageId: 'Mattermost'")
+	assert.Contains(t, handler, "appId: '{{.TeamsAppID}}'")
+	assert.NotContains(t, handler, "event.data.appId")
+}
+
+func TestShellAuthMessageChecks(t *testing.T) {
+	tests := []struct {
+		msgType string
+		actions []string
+	}{
+		{"mattermost_external_auth_login", []string{"event.source.postMessage", "iframe.src ="}},
+		{"mattermost_external_auth_complete", []string{"iframe.src ="}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.msgType, func(t *testing.T) {
+			handler := shellMessageHandler(t, tc.msgType)
+			for _, action := range tc.actions {
+				assertChecksPrecede(t, handler, action,
+					"isValidOrigin(event.origin, domainRoot)", "event.source !== iframe.contentWindow")
+			}
+		})
+	}
+}
+
+func shellMessageHandler(t *testing.T, msgType string) string {
+	t.Helper()
 
 	shell, err := fs.ReadFile(assets.Templates, "iframe.html.tmpl")
 	require.NoError(t, err)
 	shellStr := string(shell)
 
-	idx := strings.Index(shellStr, "mattermost_notification_navigate")
-	require.GreaterOrEqual(t, idx, 0, "shell must handle mattermost_notification_navigate")
+	start := strings.Index(shellStr, "if (event.data.type === '"+msgType+"') {")
+	require.GreaterOrEqual(t, start, 0, "shell must handle %s", msgType)
+	// The branch's closing brace is the first one at its own indentation.
+	end := strings.Index(shellStr[start:], "\n        }\n")
+	require.Positive(t, end, "could not find the end of the %s handler", msgType)
 
-	handler := shellStr[idx:]
-	originIdx := strings.Index(handler, "isValidOrigin")
-	navigateIdx := strings.Index(handler, "navigateToApp")
-	require.GreaterOrEqual(t, originIdx, 0, "shell must origin-check navigate messages")
-	require.GreaterOrEqual(t, navigateIdx, 0, "shell must call navigateToApp")
-	assert.Less(t, originIdx, navigateIdx, "origin check must run before navigateToApp")
+	return shellStr[start : start+end]
+}
 
-	assert.Contains(t, handler, "event.source !== iframe.contentWindow")
-	assert.Contains(t, handler, "pageId: 'Mattermost'")
-	assert.Contains(t, handler, "appId: '{{.TeamsAppID}}'")
-	assert.NotContains(t, handler, "event.data.appId")
+func assertChecksPrecede(t *testing.T, handler, action string, checks ...string) {
+	t.Helper()
+
+	actionIdx := strings.Index(handler, action)
+	require.GreaterOrEqual(t, actionIdx, 0, "handler is missing %q", action)
+	for _, check := range checks {
+		checkIdx := strings.Index(handler, check)
+		require.GreaterOrEqual(t, checkIdx, 0, "handler is missing %q", check)
+		assert.Less(t, checkIdx, actionIdx, "%q must run before %q", check, action)
+	}
 }
