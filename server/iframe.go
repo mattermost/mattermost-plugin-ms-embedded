@@ -67,7 +67,7 @@ type iFrameNotificationPreviewContext struct {
 
 // iFrame returns the iFrame HTML needed to host Mattermost within a MS Teams app.
 func (a *API) iFrame(w http.ResponseWriter, r *http.Request) {
-	a.p.API.LogDebug("iFrame", "action", r.URL.Query().Get("action"), "sub_entity_id", r.URL.Query().Get("sub_entity_id"))
+	a.p.API.LogDebug("iFrame", "sub_entity_id", r.URL.Query().Get("sub_entity_id"))
 
 	iFrameCtx, err := a.createIFrameContext("", nil)
 	if err != nil {
@@ -75,9 +75,7 @@ func (a *API) iFrame(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to create iFrame context", http.StatusInternalServerError)
 		return
 	}
-	if r.URL.Query().Get("action") == "notification_preview" {
-		iFrameCtx.TeamsAppID = a.getTeamsAppID()
-	}
+	iFrameCtx.TeamsAppID = a.getTeamsAppID()
 
 	html, err := a.formatTemplate(assets.IFrameHTMLTemplate, iFrameCtx)
 	if err != nil {
@@ -238,7 +236,8 @@ func (a *API) getTeamsAppID() string {
 	}
 
 	appID, err := a.p.pluginStore.GetAppID(client.GetTenantID())
-	if err != nil {
+	// Not-found means the connect-time app ID lookup failed, which is already logged there.
+	if err != nil && !pluginstore.IsErrNotFound(err) {
 		a.p.API.LogWarn("Failed to get app ID, View in Mattermost button in notification previews won't work", "tenantID", client.GetTenantID(), "error", err.Error())
 	}
 	return appID
