@@ -325,7 +325,7 @@ func TestOrchestrationPreAuthorizedClients(t *testing.T) {
 
 // TestOrchestrationBuildRequiredResourceAccess tests permission structure building
 func TestOrchestrationBuildRequiredResourceAccess(t *testing.T) {
-	resourceAccess, err := buildRequiredResourceAccess()
+	resourceAccess, err := buildRequiredResourceAccess(getRequiredPermissions())
 	require.NoError(t, err, "Should build resource access successfully")
 
 	require.NotEmpty(t, resourceAccess, "Should have resource access items")

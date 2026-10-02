@@ -202,6 +202,53 @@ Tests for complete workflows using mocks (no Azure credentials required):
 - ✅ Tests business logic and orchestration
 - ✅ Validates all workflow paths
 
+### 7. `doctor_test.go` - Configuration Doctor Tests
+
+Tests for the read-only `doctor` command. Every check is a pure function over a
+`doctorInputs` fixture, so the full rule set is exercised without a live tenant.
+
+**Test Cases:**
+- ✅ `TestRunDoctorChecksHealthyApplication` - A correctly configured app passes every check
+- ✅ `TestCheckSignInAudience` - Single tenant, multi tenant, and unset audiences
+- ✅ `TestCheckApplicationIDURI` - Matching, missing, mismatched, and ambiguous identifier URIs
+- ✅ `TestCheckExposedScope` - Missing, disabled, admin-only, and undocumented `access_as_user` scope
+- ✅ `TestCheckPreAuthorizedClients` - Missing clients, stale scope IDs, and unmanaged extras
+- ✅ `TestCheckRequiredPermissions` - Missing permissions and wrong permission types
+- ✅ `TestCheckServicePrincipal` - Enabled, disabled, missing, and unreadable service principals
+- ✅ `TestCheckDelegatedConsent` / `TestCheckAppRoleConsent` - Tenant-wide, per-user, and missing consent
+- ✅ `TestCheckClientSecrets` - Valid, expiring, and fully expired secrets
+- ✅ `TestCheckCertificates`, `TestCheckOwners`, `TestCheckDuplicateApplications` - Housekeeping rules
+- ✅ `TestDoctorReportFinalize` - Overall status precedence (fail > warn > pass); a `StatusSkip` alongside a `StatusPass` downgrades the overall status to `warn` and is included in the counts, so an unverified check never reports as healthy
+- ✅ `TestRenderDoctorReportHuman` / `JSON` / `Markdown` - All three report formats
+
+**Benefits:**
+- ✅ No Azure credentials required
+- ✅ Each rule is asserted independently, so a regression names the broken check
+
+### 8. `manifest_test.go` / `manifest_checks_test.go` / `catalog_test.go` - Manifest Validation
+
+Tests for `--manifest`. The happy-path fixture is
+`cmd/azure-setup/testdata/manifest.json`, a committed copy of a genuine published
+manifest rather than an invented one — so the tests track the real shape and pin that
+`id` and `webApplicationInfo.id` are independent identifiers. It is kept in `testdata`
+rather than read out of `appstore/`, where not every directory is tracked.
+
+**Test Cases:**
+- ✅ `TestLoadManifest*` - `.zip` package and bare `manifest.json`, format detected by content so a renamed download still works; missing file, malformed JSON, package with no manifest
+- ✅ `TestCheckManifestAudience` - matching, wrong host, and a case-only difference that warns rather than fails
+- ✅ `TestManifestSubpathDoubleSlashIsCaught` - the doubled separator a subpath install emits must not match the registration's URI
+- ✅ `TestManifestPathDepthNote` - a multi-segment identifier URI warns; Microsoft documents only `api://<domain>/<client-id>`
+- ✅ `TestCheckManifestClientID` / `TestCheckManifestAppID` - GUID validation, wrong registration, and that reusing one GUID for both is allowed
+- ✅ `TestCheckManifestValidDomains` - serving host missing, URLs instead of bare domains, entry count over the schema limit
+- ✅ `TestCheckManifestContentURLs` - host outside `validDomains`, wrong plugin path, plain HTTP warning; the `about` tab has no `contentUrl` and must not be counted
+- ✅ `TestCheckManifestPackage` - declared icon absent, wrong dimensions, and that icon filenames come from the manifest rather than a hardcoded convention
+- ✅ `TestCheckCatalogPublication` - published, never uploaded, stale version, unpublished state, unreadable catalog, and store distribution with an empty `externalId`
+- ✅ `TestManifestChecksAreAbsentWithoutAManifest` - no skips are emitted when `--manifest` is not used, so the verdict is not downgraded
+
+**Benefits:**
+- ✅ No Azure credentials and no tenant required
+- ✅ Each check was confirmed to fail when its rule is removed, not merely to pass
+
 ## Running Tests
 
 ### Run All Unit Tests
