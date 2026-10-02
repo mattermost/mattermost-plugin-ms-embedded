@@ -62,6 +62,20 @@ func TestIFrame(t *testing.T) {
 		assert.Contains(t, string(body), "<html")
 		assert.Contains(t, string(body), "</html>")
 	})
+
+	t.Run("renders the Teams app ID on the shell for navigateToApp", func(t *testing.T) {
+		require.NoError(t, th.p.pluginStore.StoreAppID("test-tenant-id", "test-app-id"))
+
+		w := httptest.NewRecorder()
+		th.p.apiHandler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/iframe/mattermostTab", nil))
+
+		resp := w.Result()
+		body, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Contains(t, string(body), "appId: 'test-app-id'")
+	})
 }
 
 func TestAuthenticate(t *testing.T) {
@@ -258,9 +272,10 @@ func TestIframeNotificationPreview(t *testing.T) {
 
 		// Check for CSP headers
 		assert.Contains(t, resp.Header.Get("Content-Security-Policy"), "style-src 'nonce-")
-		assert.Contains(t, resp.Header.Get("Content-Security-Policy"), "script-src https://res.cdn.office.net https://cdn.jsdelivr.net 'nonce-")
+		assert.Contains(t, resp.Header.Get("Content-Security-Policy"), "script-src https://cdn.jsdelivr.net 'nonce-")
 		assert.Contains(t, resp.Header.Get("Content-Security-Policy"), "script-src-attr 'nonce-")
-		assert.Contains(t, resp.Header.Get("Content-Security-Policy"), "connect-src https://*.microsoft.com https://*.teams.microsoft.com https://*.cdn.office.net")
+		assert.Contains(t, resp.Header.Get("Content-Security-Policy"), "connect-src 'none'")
+		assert.NotContains(t, resp.Header.Get("Content-Security-Policy"), "res.cdn.office.net")
 		assert.Contains(t, resp.Header.Get("Content-Security-Policy"), "img-src 'self'")
 		assert.Contains(t, resp.Header.Get("Content-Security-Policy"), "report-to csp-endpoint")
 		assert.Equal(t, "nosniff", resp.Header.Get("X-Content-Type-Options"))
@@ -269,10 +284,13 @@ func TestIframeNotificationPreview(t *testing.T) {
 		// Check for Report-To header
 		require.Contains(t, resp.Header.Get("Report-To"), `{"group":"csp-endpoint","max_age":10886400,"endpoints":[{"url":"/plugins/`+manifest.Id+`/csp-report"}]}`)
 
-		// Check response body contains expected HTML
+		// Check response body: HTML content, shell-delegated navigate, no Teams SDK
 		body, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
-		assert.Contains(t, string(body), "<html")
-		assert.Contains(t, string(body), post.Message)
+		bodyStr := string(body)
+		assert.Contains(t, bodyStr, "<html")
+		assert.Contains(t, bodyStr, post.Message)
+		assert.Contains(t, bodyStr, "mattermost_notification_navigate")
+		assert.NotContains(t, bodyStr, "teams-js/")
 	})
 }
