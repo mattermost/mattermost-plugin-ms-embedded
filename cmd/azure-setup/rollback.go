@@ -4,7 +4,7 @@
 package main
 
 import (
-	"fmt"
+	"slices"
 )
 
 // executeRollback executes all rollback functions in reverse order
@@ -13,23 +13,22 @@ func executeRollback(config *SetupConfig) {
 		return
 	}
 
-	fmt.Println("\n🔄 Executing rollback operations...")
+	progressln("\n🔄 Executing rollback operations...")
 
 	// Execute rollback functions in reverse order
 	// Track failures so we can warn about potentially leaked resources
 	var failures []error
-	for i := len(config.rollback) - 1; i >= 0; i-- {
-		rollbackFunc := config.rollback[i]
+	for _, rollbackFunc := range slices.Backward(config.rollback) {
 		if err := rollbackFunc(); err != nil {
 			failures = append(failures, err)
-			fmt.Printf("   ⚠️  Rollback operation failed: %v\n", err)
+			progressf("   ⚠️  Rollback operation failed: %v\n", err)
 		}
 	}
 
 	if len(failures) > 0 {
-		fmt.Printf("\n⚠️  WARNING: %d rollback operation(s) failed\n", len(failures))
-		fmt.Println("   Some Azure resources may require manual cleanup in the Azure Portal")
+		progressf("\n⚠️  WARNING: %d rollback operation(s) failed\n", len(failures))
+		progressln("   Some Azure resources may require manual cleanup in the Azure Portal")
 	} else {
-		fmt.Println("✅ Rollback complete")
+		progressln("✅ Rollback complete")
 	}
 }

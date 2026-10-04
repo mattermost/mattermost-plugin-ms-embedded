@@ -1,0 +1,75 @@
+{
+    "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.22/MicrosoftTeams.schema.json",
+    "version": "1.0.8",
+    "manifestVersion": "1.22",
+    "id": "97e1dd8c-aa8e-4253-9bff-6b70dbf0d7e3",
+    "name": {
+        "short": "Mattermost Embedded",
+        "full": "Mattermost Embedded"
+    },
+    "developer": {
+        "name": "Mattermost",
+        "mpnId": "",
+        "websiteUrl": "https://github.com/mattermost/mattermost-plugin-ms-embedded/",
+        "privacyUrl": "https://mattermost.com/privacy-policy/",
+        "termsOfUseUrl": "https://mattermost.com/software-services-license-agreement/"
+    },
+    "description": {
+        "short": "Connect with Mattermost for seamless team collaboration.",
+        "full": "The Mattermost app for Microsoft 365 provides seamless access to the Mattermost platform from inside the tools you use every day. Communicate and collaborate effectively with your team in a centralized and familiar interface.\n\nKey Features:\n- Direct Access: Access Mattermost directly from a tab without switching applications or opening a browser\n- Seamless Integration: Experience the full functionality of Mattermost within a familiar interface\n- Real-time Collaboration: Collaborate with your team on projects, workflows, and communications in real time\n\nThis app is designed to work with Microsoft 365, Outlook, and Microsoft Teams. An account with Mattermost is required to use this app.\n\nAbout Mattermost: \nMattermost is a purpose-built platform for technical and operational teams working in organizations vital to national security, public safety, and critical infrastructure. [https://mattermost.com/](https://mattermost.com/)"
+    },
+    "icons": {
+        "color": "icon-color.png",
+        "outline": "icon-outline.png"
+    },
+    "accentColor": "#1e325c",
+    "staticTabs": [
+        {
+            "entityId": "Mattermost",
+            "name": "Mattermost Embedded",
+            "contentUrl": "https://community.mattermost.com/plugins/com.mattermost.ms-embedded/iframe/mattermostTab",
+            "scopes": ["personal"]
+        },
+        {
+            "entityId": "notification_preview",
+            "name": "Notification Preview",
+            "contentUrl": "https://community.mattermost.com/plugins/com.mattermost.ms-embedded/iframe/mattermostTab?action=notification_preview",
+            "scopes": ["personal"]
+        },
+        {
+            "entityId": "about",
+            "scopes": ["personal"]
+        }
+    ],
+    "validDomains": [
+        "community.mattermost.com"
+    ],
+    "showLoadingIndicator": false,
+    "isFullScreen": true,
+    "webApplicationInfo": {
+        "id": "4ee1a558-558d-497a-b64a-bddd771292d6",
+        "resource": "api://community.mattermost.com/4ee1a558-558d-497a-b64a-bddd771292d6"
+    },
+    "authorization": {
+        "permissions": {
+            "resourceSpecific": [
+                {
+                    "name": "TeamsActivity.Send.User",
+                    "type": "Application"
+                }
+            ]
+        }
+    },
+    "devicePermissions": [
+        "media"
+    ],
+    "activities": {
+        "activityTypes": [
+            {
+                "type": "mattermost_mention_with_name",
+                "description": "New message in Mattermost for the Teams user",
+                "templateText": "{post_author} mentioned you in Mattermost."
+            }
+        ]
+    }
+ }
