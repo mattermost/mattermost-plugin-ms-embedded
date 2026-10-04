@@ -12,13 +12,20 @@ interface Props {
     placeholder?: string;
     value: string;
     disabled?: boolean;
+    maxLength?: number;
     onChange: (id: string, value: string) => void;
 }
 
 // Reusable text input component for app settings
 const TextInput: React.FC<Props> = (props) => {
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const newValue = e.target.value;
+        let newValue = e.target.value;
+
+        // Count Unicode code points (not UTF-16 units) to match server rune limits.
+        if (props.maxLength !== undefined) {
+            newValue = [...newValue].slice(0, props.maxLength).join('');
+        }
+
         props.onChange(props.id, newValue);
 
         // Dispatch custom event for real-time validation
