@@ -4,12 +4,19 @@
 package msteams
 
 import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/mattermost/mattermost/server/public/model"
+	"github.com/microsoft/kiota-abstractions-go/authentication"
+	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/mattermost/mattermost-plugin-ms-embedded/server/msteams/clientmodels"
 )
@@ -278,4 +285,78 @@ func TestGetAppReturnsErrorWhenNotConnected(t *testing.T) {
 	app, err := c.GetApp("some-app-id")
 	assert.Nil(t, app)
 	assert.Error(t, err)
+}
+
+// newCatalogTestClient serves /appCatalogs/teamsApps from catalog, keyed by the
+// $filter Graph receives, or fails every request when errStatus is non-zero. It
+// records each filter in the order it was sent.
+func newCatalogTestClient(t *testing.T, catalog map[string]string, errStatus int) (*ClientImpl, *[]string) {
+	t.Helper()
+
+	var filters []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		filter := r.URL.Query().Get("$filter")
+		filters = append(filters, filter)
+		w.Header().Set("Content-Type", "application/json")
+
+		if errStatus != 0 {
+			w.WriteHeader(errStatus)
+			_, _ = w.Write([]byte(`{"error":{"code":"Forbidden","message":"denied","innerError":{"request-id":"r1"}}}`))
+			return
+		}
+
+		body := `{"value":[]}`
+		if id, ok := catalog[filter]; ok {
+			body = fmt.Sprintf(`{"value":[{"id":%q}]}`, id)
+		}
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(server.Close)
+
+	adapter, err := msgraphsdk.NewGraphRequestAdapter(&authentication.AnonymousAuthenticationProvider{})
+	require.NoError(t, err)
+	adapter.SetBaseUrl(server.URL)
+
+	return &ClientImpl{client: msgraphsdk.NewGraphServiceClient(adapter), ctx: context.Background()}, &filters
+}
+
+func TestGetTeamsAppIDByExternalID(t *testing.T) {
+	const manifestID = "1dfa4d4c-62a4-4a92-b8e4-4a2b0a1b5e10"
+	byExternalID := "externalId eq '" + manifestID + "'"
+	byCatalogID := "id eq '" + manifestID + "'"
+
+	t.Run("organization app matches by externalId", func(t *testing.T) {
+		client, filters := newCatalogTestClient(t, map[string]string{byExternalID: "catalog-id"}, 0)
+
+		appID, err := client.GetTeamsAppIDByExternalID(manifestID)
+		require.NoError(t, err)
+		assert.Equal(t, "catalog-id", appID)
+		assert.Equal(t, []string{byExternalID}, *filters)
+	})
+
+	t.Run("store app falls back to the catalog id", func(t *testing.T) {
+		client, filters := newCatalogTestClient(t, map[string]string{byCatalogID: manifestID}, 0)
+
+		appID, err := client.GetTeamsAppIDByExternalID(manifestID)
+		require.NoError(t, err)
+		assert.Equal(t, manifestID, appID)
+		assert.Equal(t, []string{byExternalID, byCatalogID}, *filters)
+	})
+
+	t.Run("no match on either field", func(t *testing.T) {
+		client, filters := newCatalogTestClient(t, nil, 0)
+
+		_, err := client.GetTeamsAppIDByExternalID(manifestID)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), manifestID)
+		assert.Equal(t, []string{byExternalID, byCatalogID}, *filters)
+	})
+
+	t.Run("a Graph error stops the lookup", func(t *testing.T) {
+		client, filters := newCatalogTestClient(t, nil, http.StatusForbidden)
+
+		_, err := client.GetTeamsAppIDByExternalID(manifestID)
+		require.Error(t, err)
+		assert.Equal(t, []string{byExternalID}, *filters)
+	})
 }

@@ -2276,38 +2276,50 @@ func checkGroupChat(c models.Chatable, userIDs []string) *clientmodels.Chat {
 	return nil
 }
 
+// GetTeamsAppIDByExternalID resolves the tenant catalog id of the Teams app with
+// the given manifest id. Graph leaves externalId empty for store-distributed
+// apps, whose catalog id is the manifest id instead, so that is tried next.
 func (tc *ClientImpl) GetTeamsAppIDByExternalID(externalID string) (string, error) {
-	// Create filter query to find apps with matching externalId
-	filterQuery := fmt.Sprintf("externalId eq '%s'", externalID)
+	for _, field := range []string{"externalId", "id"} {
+		appID, err := tc.findTeamsAppID(field, externalID)
+		if err != nil {
+			return "", err
+		}
 
-	requestParameters := &appcatalogs.TeamsAppsRequestBuilderGetQueryParameters{
-		Filter: &filterQuery,
-		Select: []string{"id", "externalId"},
+		if appID != "" {
+			return appID, nil
+		}
 	}
+
+	return "", fmt.Errorf("no Teams application found with externalId or id: %s", externalID)
+}
+
+// findTeamsAppID returns the catalog id of the first Teams app whose field
+// equals value, or "" when none matches.
+func (tc *ClientImpl) findTeamsAppID(field, value string) (string, error) {
+	filterQuery := fmt.Sprintf("%s eq '%s'", field, value)
 
 	requestConfiguration := appcatalogs.TeamsAppsRequestBuilderGetRequestConfiguration{
-		QueryParameters: requestParameters,
+		QueryParameters: &appcatalogs.TeamsAppsRequestBuilderGetQueryParameters{
+			Filter: &filterQuery,
+			Select: []string{"id", "externalId"},
+		},
 	}
 
-	// Get teams apps with the specified filter
 	response, err := tc.client.AppCatalogs().TeamsApps().Get(tc.ctx, &requestConfiguration)
 	if err != nil {
 		return "", NormalizeGraphAPIError(err)
 	}
 
-	// Check if we got any matching apps
-	apps := response.GetValue()
-	if len(apps) == 0 {
-		return "", fmt.Errorf("no Teams application found with externalId: %s", externalID)
+	if response == nil || len(response.GetValue()) == 0 {
+		return "", nil
 	}
 
-	// Return the ID of the first matching app
-	// We expect only one app to match the external ID
-	if apps[0].GetId() == nil {
-		return "", errors.New("found Teams application with matching externalId but ID is nil")
+	if response.GetValue()[0].GetId() == nil {
+		return "", fmt.Errorf("found Teams application with matching %s but ID is nil", field)
 	}
 
-	return *apps[0].GetId(), nil
+	return *response.GetValue()[0].GetId(), nil
 }
 
 func (tc *ClientImpl) SendUserActivity(userIDs []string, activityType, message string, webURL url.URL, params map[string]string) error {

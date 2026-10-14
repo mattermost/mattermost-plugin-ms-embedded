@@ -75,12 +75,11 @@ func outputHuman(result *SetupResult) error {
 
 	fmt.Println("\n📝 NEXT STEPS")
 	fmt.Println(strings.Repeat("-", 70))
-	portalHost := result.PortalHost
-	if portalHost == "" {
-		portalHost = "portal.azure.com"
-	}
 	fmt.Println("1. Grant admin consent for API permissions:")
-	fmt.Printf("   https://%s/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/CallAnAPI/appId/%s\n", portalHost, result.ApplicationClientID)
+	if result.DoctorRequirements {
+		fmt.Println("   (this also consents to the read-only permissions the doctor needs)")
+	}
+	fmt.Printf("   %s\n", adminConsentURL(result.PortalHost, result.ApplicationClientID))
 	fmt.Println("\n2. Configure the Mattermost plugin with these values:")
 	fmt.Println("   - System Console > Plugins > Mattermost Embedded")
 	fmt.Println("   - Enter the Tenant ID, Client ID, and Client Secret above")
