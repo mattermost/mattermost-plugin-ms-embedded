@@ -56,6 +56,10 @@ func (p *NotificationsParser) ProcessPost(post *model.Post) error {
 	if err != nil {
 		return err
 	}
+	// The plugin RPC client returns (nil, nil) when the connection to the server drops.
+	if channel == nil {
+		return fmt.Errorf("channel %s not found", post.ChannelId)
+	}
 
 	for _, mention := range mentions {
 		m := &UserNotification{
