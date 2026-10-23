@@ -29,8 +29,8 @@ import (
 const (
 	// TeamsJSVersion and TeamsJSIntegrity are the single source of truth for the
 	// Microsoft Teams JS SDK loaded by iframe and SSO HTML templates. Bump both together.
-	TeamsJSVersion   = "2.53.0"
-	TeamsJSIntegrity = "sha384-UFKwOGC8ix6vOFFC4vH8hSpjwkQXZmSjCx8aaxwhbtm+6joQdNvD7b4pPk82cYAD"
+	TeamsJSVersion   = "2.58.0"
+	TeamsJSIntegrity = "sha384-sMo/EOqQPa1OCup2/VBRum7oFeOS22kvs8WGDc45xK53tUVZzFR5WwFYDUYN1LO4"
 )
 
 type iFrameContext struct {
