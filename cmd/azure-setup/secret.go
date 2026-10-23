@@ -17,11 +17,11 @@ import (
 // generateClientSecret generates a new client secret for the application
 func generateClientSecret(ctx context.Context, client *msgraphsdk.GraphServiceClient, config *SetupConfig, app models.Applicationable) (string, time.Time, error) {
 	if config.Verbose {
-		fmt.Println("🔑 Generating client secret...")
+		progressln("🔑 Generating client secret...")
 	}
 
 	if config.DryRun {
-		fmt.Printf("   [DRY RUN] Would generate client secret (expires in %d months)\n", config.SecretExpiration)
+		progressf("   [DRY RUN] Would generate client secret (expires in %d months)\n", config.SecretExpiration)
 		// Return mock values for dry run
 		expirationDate := time.Now().AddDate(0, config.SecretExpiration, 0)
 		return "mock-secret-value-for-dry-run", expirationDate, nil
@@ -50,9 +50,9 @@ func generateClientSecret(ctx context.Context, client *msgraphsdk.GraphServiceCl
 	secretValue := *result.GetSecretText()
 
 	if config.Verbose {
-		fmt.Println("✅ Client secret generated successfully")
-		fmt.Printf("   Expires: %s\n", expirationDate.Format("2006-01-02 15:04:05 MST"))
-		fmt.Println("   ⚠️  WARNING: Save this secret securely - it will not be shown again!")
+		progressln("✅ Client secret generated successfully")
+		progressf("   Expires: %s\n", expirationDate.Format("2006-01-02 15:04:05 MST"))
+		progressln("   ⚠️  WARNING: Save this secret securely - it will not be shown again!")
 	}
 
 	return secretValue, expirationDate, nil

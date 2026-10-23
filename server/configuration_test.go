@@ -4,10 +4,22 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func TestValidateConfigurationAppNameLength(t *testing.T) {
+	p := &Plugin{}
+	config := func(name string) *configuration {
+		return &configuration{M365TenantID: "t", M365ClientID: "c", M365ClientSecret: "s", AppVersion: "1.0.0", AppID: "id", AppName: name}
+	}
+
+	assert.NoError(t, p.validateConfiguration(config(strings.Repeat("a", AppNameMaxLength))))
+	assert.NoError(t, p.validateConfiguration(config(strings.Repeat("é", AppNameMaxLength))))
+	assert.ErrorContains(t, p.validateConfiguration(config(strings.Repeat("a", AppNameMaxLength+1))), "longer than 30")
+}
 
 func TestIsM365Configured(t *testing.T) {
 	tests := []struct {

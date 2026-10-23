@@ -4,11 +4,15 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/pkg/errors"
 
 	"github.com/mattermost/mattermost-plugin-ms-embedded/server/cloudenv"
 )
+
+// AppNameMaxLength is the Teams limit on the app manifest's name.short.
+const AppNameMaxLength = 30
 
 // configuration captures the plugin's external configuration as exposed in the Mattermost server
 // configuration, as well as values computed from the configuration. Any public fields will be
@@ -125,6 +129,9 @@ func (p *Plugin) validateConfiguration(configuration *configuration) error {
 	}
 	if configuration.AppName == "" {
 		return errors.New("app name should not be empty")
+	}
+	if utf8.RuneCountInString(configuration.AppName) > AppNameMaxLength {
+		return errors.Errorf("app name should not be longer than %d characters", AppNameMaxLength)
 	}
 	return nil
 }

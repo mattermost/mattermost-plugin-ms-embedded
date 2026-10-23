@@ -5,12 +5,10 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"time"
 
 	msgraphsdk "github.com/microsoftgraph/msgraph-sdk-go"
-	"github.com/microsoftgraph/msgraph-sdk-go-core/authentication"
 	"github.com/microsoftgraph/msgraph-sdk-go/models"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
@@ -22,7 +20,7 @@ var version = "dev"
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		progressf("Error: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -40,10 +38,17 @@ process required for the Mattermost Embedded plugin. It handles:
   • Application ID URI and scope setup
   • Pre-authorized client applications
   • Client secret generation
+  • Auditing an existing registration with the doctor command
 
 The tool requires an authenticated Azure account with permissions to manage
 applications in your Azure AD tenant.`,
 	Version: version,
+
+	// main already prints the error, so cobra must not print it a second time.
+	// Usage is deliberately left enabled here: a missing or misspelled flag is a
+	// usage mistake and the flag list helps. Commands that can fail for
+	// non-usage reasons silence it themselves once their flags have parsed.
+	SilenceErrors: true,
 }
 
 var createCmd = &cobra.Command{
@@ -61,6 +66,9 @@ This command will:
   6. Add pre-authorized Microsoft clients (Teams, Outlook)
   7. Generate a client secret
 
+Pass --create-doctor-requirements to additionally request the read-only Graph
+permissions that the doctor command needs.
+
 Example:
   azure-setup create --site-url https://mattermost.example.com --app-name "Mattermost for Teams"
   azure-setup create --site-url https://mm.example.com --client-id abc123... --dry-run`,
@@ -77,19 +85,54 @@ This command performs a dry-run check without making any changes.`,
 	RunE: runValidate,
 }
 
+var doctorCmd = &cobra.Command{
+	Use:   "doctor",
+	Short: "Audit an existing Azure AD application and report on its configuration",
+	Long: `Inspect an existing Azure AD application registration and report whether every
+setting the Mattermost Embedded plugin depends on is configured correctly.
+
+The doctor makes no changes. It reads the application, its service principal, and
+the consent grants in the tenant, and checks:
+
+  1. The signed-in identity and its application administration roles
+  2. The application exists, is single tenant, and has the expected Application ID URI
+  3. The access_as_user scope is exposed, enabled, and user-consentable
+  4. Every Microsoft first-party client (Teams, Outlook, Office, Copilot) is pre-authorized
+  5. The required Graph permissions are requested
+  6. A service principal exists and admin consent has been granted for each permission
+  7. At least one client secret is valid, with a warning before it expires
+  8. Housekeeping: application owners and duplicate registrations sharing the name
+
+Pass --manifest to additionally cross-check a Teams app manifest against the
+registration: the SSO audience, client ID, valid domains and tab URLs, and
+whether the app is actually published in the tenant's Teams catalog.
+
+The command exits non-zero when any check fails.
+
+Example:
+  azure-setup doctor --client-id abc123... --site-url https://mattermost.example.com
+  azure-setup doctor --app-name "Mattermost for Teams" -o markdown --report-file report.md
+  azure-setup doctor --client-id abc123... --manifest com.mattermost.ms.embedded-1.0.8.zip`,
+	RunE: runDoctor,
+}
+
 // Command flags
 var (
-	flagTenantID         string
-	flagSiteURL          string
-	flagAppName          string
-	flagClientID         string
-	flagSecretExpiration int
-	flagDryRun           bool
-	flagNonInteractive   bool
-	flagVerbose          bool
-	flagOutputFormat     string
-	flagYes              bool
-	flagCloud            string
+	flagTenantID          string
+	flagSiteURL           string
+	flagAppName           string
+	flagClientID          string
+	flagSecretExpiration  int
+	flagDryRun            bool
+	flagNonInteractive    bool
+	flagVerbose           bool
+	flagOutputFormat      string
+	flagYes               bool
+	flagCloud             string
+	flagDoctorReqs        bool
+	flagManifest          string
+	flagReportFile        string
+	flagSecretWarningDays int
 )
 
 func init() {
@@ -105,6 +148,7 @@ func init() {
 	createCmd.Flags().StringVarP(&flagOutputFormat, "output", "o", "human", "Output format (human, json, env, mattermost)")
 	createCmd.Flags().BoolVarP(&flagYes, "yes", "y", false, "Skip confirmation prompt and proceed with changes")
 	createCmd.Flags().StringVar(&flagCloud, "cloud", cloudenv.Commercial, "Microsoft national cloud (commercial, gcchigh, dod)")
+	createCmd.Flags().BoolVar(&flagDoctorReqs, "create-doctor-requirements", false, "Also request the read-only Graph permissions the doctor command needs")
 
 	_ = createCmd.MarkFlagRequired("site-url")
 
@@ -113,12 +157,29 @@ func init() {
 	validateCmd.Flags().BoolVarP(&flagVerbose, "verbose", "v", false, "Enable verbose output")
 	validateCmd.Flags().StringVar(&flagCloud, "cloud", cloudenv.Commercial, "Microsoft national cloud (commercial, gcchigh, dod)")
 
+	// Doctor command flags
+	doctorCmd.Flags().StringVar(&flagTenantID, "tenant-id", "", "Azure AD Tenant ID (optional)")
+	doctorCmd.Flags().StringVar(&flagClientID, "client-id", "", "Client ID of the application to inspect (preferred over --app-name)")
+	doctorCmd.Flags().StringVar(&flagAppName, "app-name", "Mattermost for Teams", "Application display name to look up when --client-id is not given")
+	doctorCmd.Flags().StringVar(&flagSiteURL, "site-url", "", "Mattermost site URL, used to verify the Application ID URI")
+	doctorCmd.Flags().BoolVarP(&flagVerbose, "verbose", "v", false, "Enable verbose output")
+	doctorCmd.Flags().StringVarP(&flagOutputFormat, "output", "o", "human", "Report format (human, json, markdown)")
+	doctorCmd.Flags().StringVar(&flagManifest, "manifest", "", "Teams app package (.zip) or manifest.json to cross-check against the registration")
+	doctorCmd.Flags().StringVar(&flagReportFile, "report-file", "", "Also write the report to this file")
+	doctorCmd.Flags().IntVar(&flagSecretWarningDays, "secret-warning-days", DefaultSecretWarningDays, "Warn when a client secret expires within this many days")
+	doctorCmd.Flags().StringVar(&flagCloud, "cloud", cloudenv.Commercial, "Microsoft national cloud (commercial, gcchigh, dod)")
+
 	rootCmd.AddCommand(createCmd)
 	rootCmd.AddCommand(validateCmd)
+	rootCmd.AddCommand(doctorCmd)
 }
 
 // runCreate executes the create command
 func runCreate(cmd *cobra.Command, args []string) error {
+	// Flags have parsed by the time RunE is reached, so a failure from here on
+	// is an Azure or configuration error rather than a usage mistake.
+	cmd.SilenceUsage = true
+
 	// Set a reasonable timeout for the entire operation
 	// 10 minutes allows sufficient time for device code flows with MFA
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -126,6 +187,8 @@ func runCreate(cmd *cobra.Command, args []string) error {
 
 	// Build configuration
 	config := &SetupConfig{
+		CreateDoctorRequirements: flagDoctorReqs,
+
 		TenantID:          flagTenantID,
 		MattermostSiteURL: flagSiteURL,
 		AppName:           flagAppName,
@@ -160,20 +223,10 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "Azure connection validation failed")
 	}
 
-	// Create Graph client. Use the selected cloud's Graph scope so the token
-	// audience matches the cloud's Graph endpoint (for example graph.microsoft.us).
-	authProvider, err := authentication.NewAzureIdentityAuthenticationProviderWithScopes(cred, []string{env.GraphScope})
+	client, err := newGraphClient(env, cred)
 	if err != nil {
-		return errors.Wrap(err, "failed to create auth provider")
+		return err
 	}
-
-	adapter, err := msgraphsdk.NewGraphRequestAdapter(authProvider)
-	if err != nil {
-		return errors.Wrap(err, "failed to create Graph adapter")
-	}
-	adapter.SetBaseUrl(env.GraphBaseURL)
-
-	client := msgraphsdk.NewGraphServiceClient(adapter)
 
 	// Validate permissions
 	if err = validatePermissions(ctx, client, config.Verbose); err != nil {
@@ -186,15 +239,23 @@ func runCreate(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "failed to check for existing application")
 	}
 
+	// Resolve the permission set once, before the operator is asked to approve
+	// it, so the confirmation cannot list something different from what gets
+	// requested.
+	permissions, err := resolvePermissions(ctx, client, config)
+	if err != nil {
+		return err
+	}
+
 	// Show pre-flight confirmation unless skipped
 	if !config.DryRun && !config.SkipConfirmation && !config.NonInteractive {
-		if err = showPreflightConfirmation(config, existingApp); err != nil {
+		if err = showPreflightConfirmation(config, existingApp, permissions); err != nil {
 			return err
 		}
 	}
 
 	// Execute setup with rollback on error
-	result, err := executeSetup(ctx, client, config, existingApp)
+	result, err := executeSetup(ctx, client, config, existingApp, permissions)
 	if err != nil {
 		if !config.DryRun {
 			executeRollback(config)
@@ -208,11 +269,14 @@ func runCreate(cmd *cobra.Command, args []string) error {
 
 // runValidate executes the validate command
 func runValidate(cmd *cobra.Command, args []string) error {
+	// See runCreate: past flag parsing, a failure is not a usage mistake.
+	cmd.SilenceUsage = true
+
 	// Set a reasonable timeout for validation
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	fmt.Println("🔍 Validating Azure credentials and permissions...")
+	progressln("🔍 Validating Azure credentials and permissions...")
 
 	env, err := resolveCloud(flagCloud)
 	if err != nil {
@@ -230,32 +294,22 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		return errors.Wrap(err, "Azure connection validation failed")
 	}
 
-	// Create Graph client. Use the selected cloud's Graph scope so the token
-	// audience matches the cloud's Graph endpoint (for example graph.microsoft.us).
-	authProvider, err := authentication.NewAzureIdentityAuthenticationProviderWithScopes(cred, []string{env.GraphScope})
+	client, err := newGraphClient(env, cred)
 	if err != nil {
-		return errors.Wrap(err, "failed to create auth provider")
+		return err
 	}
-
-	adapter, err := msgraphsdk.NewGraphRequestAdapter(authProvider)
-	if err != nil {
-		return errors.Wrap(err, "failed to create Graph adapter")
-	}
-	adapter.SetBaseUrl(env.GraphBaseURL)
-
-	client := msgraphsdk.NewGraphServiceClient(adapter)
 
 	// Validate permissions
 	if err = validatePermissions(ctx, client, flagVerbose); err != nil {
 		return errors.Wrap(err, "permission validation failed")
 	}
 
-	fmt.Println("\n✅ Validation complete - you are ready to create applications")
+	progressln("\n✅ Validation complete - you are ready to create applications")
 	return nil
 }
 
 // executeSetup orchestrates the entire setup process
-func executeSetup(ctx context.Context, client *msgraphsdk.GraphServiceClient, config *SetupConfig, existingApp models.Applicationable) (*SetupResult, error) {
+func executeSetup(ctx context.Context, client *msgraphsdk.GraphServiceClient, config *SetupConfig, existingApp models.Applicationable, permissions []requiredPermission) (*SetupResult, error) {
 	var app models.Applicationable
 	var created bool
 	var err error
@@ -267,7 +321,7 @@ func executeSetup(ctx context.Context, client *msgraphsdk.GraphServiceClient, co
 	}
 
 	// Configure API permissions
-	if err = configureAPIPermissions(ctx, client, config, app); err != nil {
+	if err = configureAPIPermissions(ctx, client, config, app, permissions); err != nil {
 		return nil, errors.Wrap(err, "failed to configure API permissions")
 	}
 
@@ -307,6 +361,7 @@ func executeSetup(ctx context.Context, client *msgraphsdk.GraphServiceClient, co
 
 	// Build result
 	result := &SetupResult{
+		DoctorRequirements:  config.CreateDoctorRequirements,
 		Success:             true,
 		Message:             "Setup completed successfully",
 		ApplicationClientID: *app.GetAppId(),
