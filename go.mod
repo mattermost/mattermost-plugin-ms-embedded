@@ -12,7 +12,7 @@ require (
 	github.com/mattermost/mattermost/server/v8 v8.0.0-20260626143749-f31c2869bad3
 	github.com/microsoft/kiota-abstractions-go v1.9.4
 	github.com/microsoft/kiota-http-go v1.5.6
-	github.com/microsoftgraph/msgraph-sdk-go v1.100.0
+	github.com/microsoftgraph/msgraph-sdk-go v1.101.0
 	github.com/microsoftgraph/msgraph-sdk-go-core v1.4.1
 	github.com/moby/moby/api v1.54.2
 	github.com/pkg/errors v0.9.1
