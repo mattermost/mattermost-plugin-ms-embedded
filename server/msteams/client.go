@@ -2279,9 +2279,9 @@ func checkGroupChat(c models.Chatable, userIDs []string) *clientmodels.Chat {
 // GetTeamsAppIDByExternalID resolves the tenant catalog id of the Teams app with
 // the given manifest id. Graph leaves externalId empty for store-distributed
 // apps, whose catalog id is the manifest id instead, so that is tried next.
-func (tc *ClientImpl) GetTeamsAppIDByExternalID(externalID string) (string, error) {
+func (tc *ClientImpl) GetTeamsAppIDByExternalID(ctx context.Context, externalID string) (string, error) {
 	for _, field := range []string{"externalId", "id"} {
-		appID, err := tc.findTeamsAppID(field, externalID)
+		appID, err := tc.findTeamsAppID(ctx, field, externalID)
 		if err != nil {
 			return "", err
 		}
@@ -2296,7 +2296,7 @@ func (tc *ClientImpl) GetTeamsAppIDByExternalID(externalID string) (string, erro
 
 // findTeamsAppID returns the catalog id of the first Teams app whose field
 // equals value, or "" when none matches.
-func (tc *ClientImpl) findTeamsAppID(field, value string) (string, error) {
+func (tc *ClientImpl) findTeamsAppID(ctx context.Context, field, value string) (string, error) {
 	filterQuery := fmt.Sprintf("%s eq '%s'", field, value)
 
 	requestConfiguration := appcatalogs.TeamsAppsRequestBuilderGetRequestConfiguration{
@@ -2306,7 +2306,7 @@ func (tc *ClientImpl) findTeamsAppID(field, value string) (string, error) {
 		},
 	}
 
-	response, err := tc.client.AppCatalogs().TeamsApps().Get(tc.ctx, &requestConfiguration)
+	response, err := tc.client.AppCatalogs().TeamsApps().Get(ctx, &requestConfiguration)
 	if err != nil {
 		return "", NormalizeGraphAPIError(err)
 	}

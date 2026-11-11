@@ -3,6 +3,7 @@
 package mocks
 
 import (
+	context "context"
 	io "io"
 
 	clientmodels "github.com/mattermost/mattermost-plugin-ms-embedded/server/msteams/clientmodels"
@@ -611,9 +612,9 @@ func (_m *Client) GetTeams(filterQuery string) ([]*clientmodels.Team, error) {
 	return r0, r1
 }
 
-// GetTeamsAppIDByExternalID provides a mock function with given fields: externalID
-func (_m *Client) GetTeamsAppIDByExternalID(externalID string) (string, error) {
-	ret := _m.Called(externalID)
+// GetTeamsAppIDByExternalID provides a mock function with given fields: ctx, externalID
+func (_m *Client) GetTeamsAppIDByExternalID(ctx context.Context, externalID string) (string, error) {
+	ret := _m.Called(ctx, externalID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetTeamsAppIDByExternalID")
@@ -621,17 +622,17 @@ func (_m *Client) GetTeamsAppIDByExternalID(externalID string) (string, error) {
 
 	var r0 string
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string) (string, error)); ok {
-		return rf(externalID)
+	if rf, ok := ret.Get(0).(func(context.Context, string) (string, error)); ok {
+		return rf(ctx, externalID)
 	}
-	if rf, ok := ret.Get(0).(func(string) string); ok {
-		r0 = rf(externalID)
+	if rf, ok := ret.Get(0).(func(context.Context, string) string); ok {
+		r0 = rf(ctx, externalID)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
 
-	if rf, ok := ret.Get(1).(func(string) error); ok {
-		r1 = rf(externalID)
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, externalID)
 	} else {
 		r1 = ret.Error(1)
 	}

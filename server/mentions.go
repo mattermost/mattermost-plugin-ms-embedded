@@ -5,6 +5,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -299,6 +300,10 @@ func (p *NotificationsParser) sendUserActivity(userActivity *UserActivity) error
 
 	urlParams := url.Values{}
 	urlParams.Set("context", string(jsonContext))
+
+	if p.msteamsAppClient == nil {
+		return errors.New("app client is not connected")
+	}
 
 	appID, err := p.getAppID()
 	if err != nil {

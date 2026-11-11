@@ -323,11 +323,17 @@ func (p *Plugin) restart() {
 	p.start(true)
 }
 
-const appIDLookupRetryInterval = time.Minute
+const (
+	appIDLookupRetryInterval = time.Minute
+	appIDLookupTimeout       = 10 * time.Second
+)
 
 // refreshTeamsAppID looks up the Teams app catalog ID, stores it, and returns it.
 func (p *Plugin) refreshTeamsAppID(client msteams.Client) (string, error) {
-	appID, err := client.GetTeamsAppIDByExternalID(p.getConfiguration().AppID)
+	ctx, cancel := context.WithTimeout(context.Background(), appIDLookupTimeout)
+	defer cancel()
+
+	appID, err := client.GetTeamsAppIDByExternalID(ctx, p.getConfiguration().AppID)
 	if err != nil {
 		return "", fmt.Errorf("failed to look up Teams application ID: %w", err)
 	}
@@ -359,8 +365,12 @@ func (p *Plugin) getTeamsAppID() (string, error) {
 	p.appIDLookupLock.Lock()
 	defer p.appIDLookupLock.Unlock()
 
-	if appID, err = p.pluginStore.GetAppID(client.GetTenantID()); err == nil {
+	appID, err = p.pluginStore.GetAppID(client.GetTenantID())
+	if err == nil {
 		return appID, nil
+	}
+	if !pluginstore.IsErrNotFound(err) {
+		return "", err
 	}
 	if time.Since(p.appIDLookupFailedAt) < appIDLookupRetryInterval {
 		return "", errors.New("teams application ID lookup failed recently, not retrying yet")
