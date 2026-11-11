@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strings"
@@ -34,6 +35,10 @@ type Plugin struct {
 	// msteamsAppClient is the client used to communicate with the Microsoft Teams API.
 	msteamsAppClient      msteams.Client
 	msteamsAppClientMutex sync.RWMutex
+
+	// appIDLookupLock serializes on-demand Teams app ID lookups; appIDLookupFailedAt throttles retries after a failure.
+	appIDLookupLock     sync.Mutex
+	appIDLookupFailedAt time.Time
 
 	// configurationLock synchronizes access to the configuration.
 	configurationLock sync.RWMutex
@@ -318,6 +323,68 @@ func (p *Plugin) restart() {
 	p.start(true)
 }
 
+const (
+	appIDLookupRetryInterval = time.Minute
+	appIDLookupTimeout       = 10 * time.Second
+)
+
+// refreshTeamsAppID looks up the Teams app catalog ID, stores it, and returns it.
+func (p *Plugin) refreshTeamsAppID(client msteams.Client) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), appIDLookupTimeout)
+	defer cancel()
+
+	appID, err := client.GetTeamsAppIDByExternalID(ctx, p.getConfiguration().AppID)
+	if err != nil {
+		return "", fmt.Errorf("failed to look up Teams application ID: %w", err)
+	}
+
+	if err := p.pluginStore.StoreAppID(client.GetTenantID(), appID); err != nil {
+		return "", fmt.Errorf("failed to store Teams application ID: %w", err)
+	}
+
+	p.API.LogDebug("Retrieved Teams internal application ID", "appID", appID)
+	return appID, nil
+}
+
+// getTeamsAppID returns the stored Teams app catalog ID. When none is stored,
+// it looks the ID up again, because the lookup at connect time can fail.
+func (p *Plugin) getTeamsAppID() (string, error) {
+	client := p.GetClientForApp()
+	if client == nil {
+		return "", errors.New("app client is not connected")
+	}
+
+	appID, err := p.pluginStore.GetAppID(client.GetTenantID())
+	if err == nil {
+		return appID, nil
+	}
+	if !pluginstore.IsErrNotFound(err) {
+		return "", err
+	}
+
+	p.appIDLookupLock.Lock()
+	defer p.appIDLookupLock.Unlock()
+
+	appID, err = p.pluginStore.GetAppID(client.GetTenantID())
+	if err == nil {
+		return appID, nil
+	}
+	if !pluginstore.IsErrNotFound(err) {
+		return "", err
+	}
+	if time.Since(p.appIDLookupFailedAt) < appIDLookupRetryInterval {
+		return "", errors.New("teams application ID lookup failed recently, not retrying yet")
+	}
+
+	appID, err = p.refreshTeamsAppID(client)
+	if err != nil {
+		p.appIDLookupFailedAt = time.Now()
+		return "", err
+	}
+
+	return appID, nil
+}
+
 func (p *Plugin) connectTeamsAppClient() error {
 	p.msteamsAppClientMutex.Lock()
 	defer p.msteamsAppClientMutex.Unlock()
@@ -347,18 +414,10 @@ func (p *Plugin) connectTeamsAppClient() error {
 		return err
 	}
 
-	// Retrieve the Teams application ID by external ID (using M365 client ID)
 	if p.getConfiguration().M365ClientID != "" {
-		appID, err := p.msteamsAppClient.GetTeamsAppIDByExternalID(p.getConfiguration().AppID)
-		if err != nil {
+		// The ID is required for activity feed notifications only. A failure is logged and retried on demand.
+		if _, err := p.refreshTeamsAppID(p.msteamsAppClient); err != nil {
 			p.API.LogError("Unable to retrieve Teams application ID", "error", err)
-			// App ID is required for activity feed notifications but not for basic functionality
-		} else {
-			if err := p.pluginStore.StoreAppID(p.msteamsAppClient.GetTenantID(), appID); err != nil {
-				p.API.LogError("Unable to store Teams internal application ID", "error", err)
-			} else {
-				p.API.LogDebug("Retrieved Teams internal application ID", "appID", appID)
-			}
 		}
 	}
 

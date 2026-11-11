@@ -229,16 +229,9 @@ func (a *API) createIFrameContext(userID string, post *model.Post) (iFrameContex
 }
 
 func (a *API) getTeamsAppID() string {
-	// Get the app ID using the client's tenant ID to ensure consistency with storage
-	client := a.p.GetClientForApp()
-	if client == nil {
-		return ""
-	}
-
-	appID, err := a.p.pluginStore.GetAppID(client.GetTenantID())
-	// Not-found means the connect-time app ID lookup failed, which is already logged there.
-	if err != nil && !pluginstore.IsErrNotFound(err) {
-		a.p.API.LogWarn("Failed to get app ID, View in Mattermost button in notification previews won't work", "tenantID", client.GetTenantID(), "error", err.Error())
+	appID, err := a.p.getTeamsAppID()
+	if err != nil {
+		a.p.API.LogWarn("Failed to get app ID, View in Mattermost button in notification previews won't work", "error", err.Error())
 	}
 	return appID
 }
@@ -468,7 +461,7 @@ func (p *Plugin) MessageHasBeenPosted(c *plugin.Context, post *model.Post) {
 		return
 	}
 
-	parser := NewNotificationsParser(p.API, p.pluginStore, p.msteamsAppClient, p.getConfiguration().CloudEnvironment().TeamsDomain)
+	parser := NewNotificationsParser(p.API, p.pluginStore, p.GetClientForApp(), p.getConfiguration().CloudEnvironment().TeamsDomain, p.getTeamsAppID)
 	if err := parser.ProcessPost(post); err != nil {
 		p.API.LogError("Failed to process mentions", "error", err.Error())
 		return
