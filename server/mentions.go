@@ -39,14 +39,16 @@ type NotificationsParser struct {
 	Notifications    []*UserNotification
 	msteamsAppClient msteams.Client
 	teamsDomain      string
+	getAppID         func() (string, error)
 }
 
-func NewNotificationsParser(api plugin.API, pluginStore pluginstore.Store, msteamsAppClient msteams.Client, teamsDomain string) *NotificationsParser {
+func NewNotificationsParser(api plugin.API, pluginStore pluginstore.Store, msteamsAppClient msteams.Client, teamsDomain string, getAppID func() (string, error)) *NotificationsParser {
 	return &NotificationsParser{
 		PAPI:             api,
 		pluginStore:      pluginStore,
 		msteamsAppClient: msteamsAppClient,
 		teamsDomain:      teamsDomain,
+		getAppID:         getAppID,
 	}
 }
 
@@ -298,7 +300,7 @@ func (p *NotificationsParser) sendUserActivity(userActivity *UserActivity) error
 	urlParams := url.Values{}
 	urlParams.Set("context", string(jsonContext))
 
-	appID, err := p.pluginStore.GetAppID(p.msteamsAppClient.GetTenantID())
+	appID, err := p.getAppID()
 	if err != nil {
 		p.PAPI.LogError("Failed to get app ID", "error", err.Error())
 		return fmt.Errorf("failed to get app ID: %w", err)
