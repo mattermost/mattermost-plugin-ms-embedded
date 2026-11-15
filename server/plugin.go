@@ -328,6 +328,11 @@ const (
 	appIDLookupTimeout       = 10 * time.Second
 )
 
+var (
+	errAppClientNotConnected = errors.New("app client is not connected")
+	errAppIDLookupThrottled  = errors.New("teams application ID lookup failed recently, not retrying yet")
+)
+
 // refreshTeamsAppID looks up the Teams app catalog ID, stores it, and returns it.
 func (p *Plugin) refreshTeamsAppID(client msteams.Client) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), appIDLookupTimeout)
@@ -351,7 +356,7 @@ func (p *Plugin) refreshTeamsAppID(client msteams.Client) (string, error) {
 func (p *Plugin) getTeamsAppID() (string, error) {
 	client := p.GetClientForApp()
 	if client == nil {
-		return "", errors.New("app client is not connected")
+		return "", errAppClientNotConnected
 	}
 
 	appID, err := p.pluginStore.GetAppID(client.GetTenantID())
@@ -373,7 +378,7 @@ func (p *Plugin) getTeamsAppID() (string, error) {
 		return "", err
 	}
 	if time.Since(p.appIDLookupFailedAt) < appIDLookupRetryInterval {
-		return "", errors.New("teams application ID lookup failed recently, not retrying yet")
+		return "", errAppIDLookupThrottled
 	}
 
 	appID, err = p.refreshTeamsAppID(client)

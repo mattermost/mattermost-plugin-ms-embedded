@@ -5,7 +5,6 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -301,16 +300,6 @@ func (p *NotificationsParser) sendUserActivity(userActivity *UserActivity) error
 	urlParams := url.Values{}
 	urlParams.Set("context", string(jsonContext))
 
-	if p.msteamsAppClient == nil {
-		return errors.New("app client is not connected")
-	}
-
-	appID, err := p.getAppID()
-	if err != nil {
-		p.PAPI.LogError("Failed to get app ID", "error", err.Error())
-		return fmt.Errorf("failed to get app ID: %w", err)
-	}
-
 	msteamsUserIDs := []string{}
 	for _, user := range userActivity.Users {
 		storedUser, err := p.pluginStore.GetUser(user.Id)
@@ -327,6 +316,16 @@ func (p *NotificationsParser) sendUserActivity(userActivity *UserActivity) error
 	if len(msteamsUserIDs) == 0 {
 		p.PAPI.LogDebug("No registered users found for notification", "post_id", userActivity.UserNotification.Post.Id)
 		return nil
+	}
+
+	if p.msteamsAppClient == nil {
+		return errAppClientNotConnected
+	}
+
+	appID, err := p.getAppID()
+	if err != nil {
+		p.PAPI.LogError("Failed to get app ID", "error", err.Error())
+		return fmt.Errorf("failed to get app ID: %w", err)
 	}
 
 	if err := p.msteamsAppClient.SendUserActivity(msteamsUserIDs, "mattermost_mention_with_name", message, url.URL{

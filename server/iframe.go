@@ -9,6 +9,7 @@ import (
 	_ "embed"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -230,8 +231,9 @@ func (a *API) createIFrameContext(userID string, post *model.Post) (iFrameContex
 
 func (a *API) getTeamsAppID() string {
 	appID, err := a.p.getTeamsAppID()
-	if err != nil {
-		a.p.API.LogWarn("Failed to get app ID, View in Mattermost button in notification previews won't work", "error", err.Error())
+	// The throttled case was already logged when the lookup failed.
+	if err != nil && !errors.Is(err, errAppClientNotConnected) && !errors.Is(err, errAppIDLookupThrottled) {
+		a.p.API.LogWarn("Failed to get app ID, View in Mattermost button in notification previews won't work", "tenantID", a.p.getConfiguration().M365TenantID, "error", err.Error())
 	}
 	return appID
 }
@@ -461,7 +463,12 @@ func (p *Plugin) MessageHasBeenPosted(c *plugin.Context, post *model.Post) {
 		return
 	}
 
-	parser := NewNotificationsParser(p.API, p.pluginStore, p.GetClientForApp(), p.getConfiguration().CloudEnvironment().TeamsDomain, p.getTeamsAppID)
+	client := p.GetClientForApp()
+	if client == nil {
+		return
+	}
+
+	parser := NewNotificationsParser(p.API, p.pluginStore, client, p.getConfiguration().CloudEnvironment().TeamsDomain, p.getTeamsAppID)
 	if err := parser.ProcessPost(post); err != nil {
 		p.API.LogError("Failed to process mentions", "error", err.Error())
 		return
