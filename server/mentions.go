@@ -39,14 +39,16 @@ type NotificationsParser struct {
 	Notifications    []*UserNotification
 	msteamsAppClient msteams.Client
 	teamsDomain      string
+	getAppID         func() (string, error)
 }
 
-func NewNotificationsParser(api plugin.API, pluginStore pluginstore.Store, msteamsAppClient msteams.Client, teamsDomain string) *NotificationsParser {
+func NewNotificationsParser(api plugin.API, pluginStore pluginstore.Store, msteamsAppClient msteams.Client, teamsDomain string, getAppID func() (string, error)) *NotificationsParser {
 	return &NotificationsParser{
 		PAPI:             api,
 		pluginStore:      pluginStore,
 		msteamsAppClient: msteamsAppClient,
 		teamsDomain:      teamsDomain,
+		getAppID:         getAppID,
 	}
 }
 
@@ -298,12 +300,6 @@ func (p *NotificationsParser) sendUserActivity(userActivity *UserActivity) error
 	urlParams := url.Values{}
 	urlParams.Set("context", string(jsonContext))
 
-	appID, err := p.pluginStore.GetAppID(p.msteamsAppClient.GetTenantID())
-	if err != nil {
-		p.PAPI.LogError("Failed to get app ID", "error", err.Error())
-		return fmt.Errorf("failed to get app ID: %w", err)
-	}
-
 	msteamsUserIDs := []string{}
 	for _, user := range userActivity.Users {
 		storedUser, err := p.pluginStore.GetUser(user.Id)
@@ -320,6 +316,16 @@ func (p *NotificationsParser) sendUserActivity(userActivity *UserActivity) error
 	if len(msteamsUserIDs) == 0 {
 		p.PAPI.LogDebug("No registered users found for notification", "post_id", userActivity.UserNotification.Post.Id)
 		return nil
+	}
+
+	if p.msteamsAppClient == nil {
+		return errAppClientNotConnected
+	}
+
+	appID, err := p.getAppID()
+	if err != nil {
+		p.PAPI.LogError("Failed to get app ID", "error", err.Error())
+		return fmt.Errorf("failed to get app ID: %w", err)
 	}
 
 	if err := p.msteamsAppClient.SendUserActivity(msteamsUserIDs, "mattermost_mention_with_name", message, url.URL{

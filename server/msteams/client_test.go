@@ -328,7 +328,7 @@ func TestGetTeamsAppIDByExternalID(t *testing.T) {
 	t.Run("organization app matches by externalId", func(t *testing.T) {
 		client, filters := newCatalogTestClient(t, map[string]string{byExternalID: "catalog-id"}, 0)
 
-		appID, err := client.GetTeamsAppIDByExternalID(manifestID)
+		appID, err := client.GetTeamsAppIDByExternalID(context.Background(), manifestID)
 		require.NoError(t, err)
 		assert.Equal(t, "catalog-id", appID)
 		assert.Equal(t, []string{byExternalID}, *filters)
@@ -337,7 +337,7 @@ func TestGetTeamsAppIDByExternalID(t *testing.T) {
 	t.Run("store app falls back to the catalog id", func(t *testing.T) {
 		client, filters := newCatalogTestClient(t, map[string]string{byCatalogID: manifestID}, 0)
 
-		appID, err := client.GetTeamsAppIDByExternalID(manifestID)
+		appID, err := client.GetTeamsAppIDByExternalID(context.Background(), manifestID)
 		require.NoError(t, err)
 		assert.Equal(t, manifestID, appID)
 		assert.Equal(t, []string{byExternalID, byCatalogID}, *filters)
@@ -346,7 +346,7 @@ func TestGetTeamsAppIDByExternalID(t *testing.T) {
 	t.Run("no match on either field", func(t *testing.T) {
 		client, filters := newCatalogTestClient(t, nil, 0)
 
-		_, err := client.GetTeamsAppIDByExternalID(manifestID)
+		_, err := client.GetTeamsAppIDByExternalID(context.Background(), manifestID)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), manifestID)
 		assert.Equal(t, []string{byExternalID, byCatalogID}, *filters)
@@ -355,7 +355,7 @@ func TestGetTeamsAppIDByExternalID(t *testing.T) {
 	t.Run("a Graph error stops the lookup", func(t *testing.T) {
 		client, filters := newCatalogTestClient(t, nil, http.StatusForbidden)
 
-		_, err := client.GetTeamsAppIDByExternalID(manifestID)
+		_, err := client.GetTeamsAppIDByExternalID(context.Background(), manifestID)
 		require.Error(t, err)
 		assert.Equal(t, []string{byExternalID}, *filters)
 	})

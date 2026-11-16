@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -148,6 +149,7 @@ func (th *testHelper) Reset(t *testing.T) *testHelper {
 
 	appClientMock.On("GetApp", mock.AnythingOfType("string")).Return(&clientmodels.App{}, nil).Maybe()
 	appClientMock.On("GetTenantID").Return("test-tenant-id").Maybe()
+	appClientMock.On("GetTeamsAppIDByExternalID", mock.Anything, mock.Anything).Return("", errors.New("not found")).Maybe()
 	clientMock.On("GetApp", mock.AnythingOfType("string")).Return(&clientmodels.App{}, nil).Maybe()
 	clientMock.On("GetTenantID").Return("test-tenant-id").Maybe()
 

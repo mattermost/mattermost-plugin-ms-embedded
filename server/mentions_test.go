@@ -15,7 +15,7 @@ func TestProcessPostNilChannel(t *testing.T) {
 	api := &plugintest.API{}
 	api.On("GetChannel", "channel-id").Return(nil, nil)
 
-	parser := NewNotificationsParser(api, nil, nil, "")
+	parser := NewNotificationsParser(api, nil, nil, "", nil)
 	err := parser.ProcessPost(&model.Post{ChannelId: "channel-id", Message: "hello"})
 
 	assert.ErrorContains(t, err, "channel-id")
